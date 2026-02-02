@@ -1,0 +1,39 @@
+name: Build Wonderful Kernel + KSU
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install Build Tools
+        run: |
+          sudo apt update
+          sudo apt install -y bc bison build-essential flex gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libncurses5-dev git curl
+
+      - name:
+        run: |
+          mkdir -p arch/arm64/crypto/
+          curl -LSs "https://raw.githubusercontent.com/itejo443/android_kernel_samsung_sm7225/ksm/arch/arm64/crypto/aes-modes.S" -o arch/arm64/crypto/aes-modes.S
+          echo "Correção AES importada!"
+
+      - name: Setup KernelSU
+        run: |
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+
+      - name: Build Kernel
+        run: |
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          # Tenta usar o defconfig do A23
+          make a23_defconfig || make a23q_defconfig
+          make -j$(nproc)
+
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v3
+        with:
+          name: Wonderful_Kernel_A23
+          path: arch/arm64/boot/Image.gz-dtb
