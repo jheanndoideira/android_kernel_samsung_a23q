@@ -1,4 +1,4 @@
-name: Build Wonderful Kernel A23 - VDSO KILLER
+name: Build Wonderful Kernel A23 - SAFE CODE FIX
 
 on:
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
           git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 --single-branch -b master aosp-clang/clang
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 --single-branch -b android-14.0.0_r0.47 aosp-clang/gcc64
           
-      - name: Build Kernel (Kill VDSO Error)
+      - name: Build Kernel (Safe Toolchain Fix)
         run: |
           CLANG_BIN="$GITHUB_WORKSPACE/aosp-clang/clang/bin"
           GCC_BIN="$GITHUB_WORKSPACE/aosp-clang/gcc64/bin"
@@ -43,30 +43,35 @@ jobs:
           make mrproper
           mkdir -p out
           
-          # 1. Gera a config base
+          # Gera a config oficial da Samsung
           make O=out rsuntk_defconfig
           
-          # 2. REMOVE O VDSO (O arquivo que dá erro de Assembler)
-          sed -i 's/CONFIG_VDSO=y/CONFIG_VDSO=n/g' out/.config
-          echo "CONFIG_VDSO=n" >> out/.config
-          
-          # 3. Força as respostas "Enter" para a nova config
-          yes "" | make O=out oldconfig
-          
-          echo "--- DESATIVANDO TRAVAS DE SEGURANÇA ---"
+          echo "--- CORRIGINDO CONFLITOS DE SEGURANÇA ---"
           scripts/config --file out/.config --disable MODULE_SIG
           scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
+          scripts/config --file out/.config --disable SYSTEM_REVOCATION_LIST
           
-          echo "--- INICIANDO COMPILAÇÃO ---"
-          # LLVM_IAS=1 agora é seguro porque o VDSO foi removido
-          yes "" | make -j2 O=out CC=clang LLVM=1 LLVM_IAS=1 \
-          KCFLAGS="-w -fno-builtin -fcommon -Wno-implicit-function-declaration" \
-          CONFIG_VDSO=n \
-          CONFIG_DEBUG_INFO_BTF=n \
-          CONFIG_MODULE_SIG=n
+          # Força a aceitação das novas opções sem travar
+          yes "" | make O=out oldconfig
+          
+          echo "--- COMPILANDO COM MODO COMPATIBILIDADE ---"
+          # LLVM_IAS=0 força o uso do assembler do GCC (Binutils)
+          # Isso resolve o 'junk at end of line' sem precisar deletar arquivos
+          yes "" | make -j2 O=out \
+          CC=clang \
+          LD=ld.lld \
+          AR=llvm-ar \
+          NM=llvm-nm \
+          OBJCOPY=llvm-objcopy \
+          OBJDUMP=llvm-objdump \
+          STRIP=llvm-strip \
+          CROSS_COMPILE=aarch64-linux-android- \
+          CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+          LLVM_IAS=0 \
+          KCFLAGS="-w -fno-builtin -fcommon"
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_KSU_NoVDSO
+          name: Kernel_A23_KSU_SafeFix
           path: out/arch/arm64/boot/Image
