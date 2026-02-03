@@ -1,4 +1,4 @@
-name: Build Kernel A23 - NATHAN WIKI FIX
+name: Build Kernel A23 - NATHAN DYNAMIC FIX
 
 on:
   workflow_dispatch:
@@ -20,39 +20,43 @@ jobs:
           
       - name: Download Tools
         run: |
-          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 $GITHUB_WORKSPACE/clang-tools
-          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 $GITHUB_WORKSPACE/gcc-tools
+          # Clonando em pastas separadas e sem adivinhar subpastas
+          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 $GITHUB_WORKSPACE/clang_tools
+          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 $GITHUB_WORKSPACE/gcc_tools
           
-      - name: Build Kernel (Cleaning Junk like Nathan)
+      - name: Build Kernel (Dynamic Path Fix)
         run: |
-          # Achar os compiladores
-          CLANG_BIN=$(find $GITHUB_WORKSPACE/clang-tools -name clang -type f -executable | head -n 1 | xargs dirname)
-          GCC_BIN=$(find $GITHUB_WORKSPACE/gcc-tools -name "aarch64-linux-android-gcc" -type f -executable | head -n 1 | xargs dirname)
-          export PATH="$CLANG_BIN:$GCC_BIN:$PATH"
+          # A MÁGICA: Achar o caminho real do executável clang e do gcc
+          REAL_CLANG_PATH=$(find $GITHUB_WORKSPACE/clang_tools -name clang -type f -executable | head -n 1 | xargs dirname)
+          REAL_GCC_PATH=$(find $GITHUB_WORKSPACE/gcc_tools -name aarch64-linux-android-gcc -type f -executable | head -n 1 | xargs dirname)
           
+          echo "Clang achado em: $REAL_CLANG_PATH"
+          echo "GCC achado em: $REAL_GCC_PATH"
+          
+          # Adiciona ao PATH
+          export PATH="$REAL_CLANG_PATH:$REAL_GCC_PATH:$PATH"
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           
-          # A LIÇÃO DO NATHAN: Limpar as diretivas que o assembler não entende
-          # Removemos flags que injetam "lixo" (caracteres especiais) no assembly do vDSO
+          # FIX DO NATHAN (Lixo no fim da linha)
+          # Limpando o Makefile do vDSO para não gerar "junk"
           sed -i 's/-fno-asynchronous-unwind-tables//g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/-fno-stack-protector//g' arch/arm64/kernel/vdso/Makefile
-          sed -i 's/-fstack-protector-strong//g' arch/arm64/kernel/vdso/Makefile
-          sed -i 's/-fstack-protector//g' arch/arm64/kernel/vdso/Makefile
           
           make mrproper
           mkdir -p out
           make O=out rsuntk_defconfig
           
-          # Desativar travas (essencial para GSI Android 16)
+          # Ajustes para GSI Android 16
           scripts/config --file out/.config --disable MODULE_SIG
           scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
           
           yes "" | make O=out oldconfig
           
-          echo "--- COMPILANDO SEM LIXO ---"
-          # LLVM_IAS=0 força o uso do assembler do GCC (que agora receberá código limpo)
+          echo "--- COMPILANDO ---"
+          # LLVM_IAS=0 usa o assembler do GCC (Fix do lixo/junk)
           yes "" | make -j$(nproc --all) O=out \
           CC=clang \
           LLVM=1 \
@@ -62,5 +66,5 @@ jobs:
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_Nathan_Fix
+          name: Kernel_A23_GSI_Nathan_Final
           path: out/arch/arm64/boot/Image
