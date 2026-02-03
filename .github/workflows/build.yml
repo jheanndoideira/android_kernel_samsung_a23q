@@ -1,4 +1,4 @@
-name: Build Kernel A23 - ULTIMATE VDSO FIX
+name: Build Kernel A23 - GSI ANDROID 16 FINAL SUCCESS
 
 on:
   workflow_dispatch:
@@ -16,53 +16,54 @@ jobs:
 
       - name: Add KernelSU
         run: |
+          # Adiciona o KernelSU diretamente no código fonte
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
       - name: Install Compilers
         run: |
           sudo apt update
-          # Usando o Clang 15 e GCC para garantir compatibilidade GSI Android 16
+          # Instalando Clang 15 e GCC-AARCH64 (O "Dream Team" para o seu Kernel)
           sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           
-      - name: Build Kernel (Applying Research Solutions)
+      - name: Build Kernel (Safe & Surgical Mode)
         run: |
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           
-          # --- APLICAÇÃO DA SOLUÇÃO 1 (Sua Pesquisa) ---
+          # 1. SOLUÇÃO VDSO (Baseada na sua pesquisa e no erro de Relocation)
           # Força -fPIC e desabilita stack-protector no Makefile do vDSO
           VDSO_MAKEFILE="arch/arm64/kernel/vdso/Makefile"
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' $VDSO_MAKEFILE
-          
-          # Garante que as flags específicas de vgettimeofday não usem proteção de pilha
           echo "CFLAGS_vgettimeofday.o += -fno-stack-protector -fPIC" >> $VDSO_MAKEFILE
           echo "CFLAGS_gettimeofday.o += -fno-stack-protector -fPIC" >> $VDSO_MAKEFILE
           
-          # Remove o "Junk" (Sua descoberta anterior do Nathan)
+          # 2. SOLUÇÃO NATHAN (Remove flags que geram o erro de "Junk")
           sed -i 's/-fno-asynchronous-unwind-tables//g' $VDSO_MAKEFILE
 
-          # --- PREPARAÇÃO ---
+          # 3. PREPARAÇÃO DA CONFIGURAÇÃO
           make mrproper
           mkdir -p out
           make O=out rsuntk_defconfig
           
-          # --- APLICAÇÃO DA SOLUÇÃO 2 (Sua Pesquisa) ---
-          # Desativa Stack Protector via defconfig para evitar conflitos
+          # 4. AJUSTES PARA GSI ANDROID 16 E SEGURANÇA (Botão Power Quebrado)
+          # Desativa assinaturas e proteções que causam Bootloop em GSI
+          scripts/config --file out/.config --disable MODULE_SIG
+          scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
           scripts/config --file out/.config --disable STACKPROTECTOR
           scripts/config --file out/.config --disable STACKPROTECTOR_STRONG
           
-          # Ajustes para GSI Android 16 e Botão Power Quebrado
-          scripts/config --file out/.config --disable MODULE_SIG
-          scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
+          # Proteção Anti-Panic (Se der erro, o celular não reinicia, facilitando o uso do Bugjaeger)
           scripts/config --file out/.config --disable PANIC_ON_OOPS
           scripts/config --file out/.config --set-val PANIC_TIMEOUT 0
           
-          yes "" | make O=out oldconfig
+          # 5. ACEITAR OPÇÕES NOVAS (RELR, VMAP_STACK, etc) AUTOMATICAMENTE
+          # Isso resolve o erro de "Error in reading or end of file"
+          make O=out olddefconfig
           
-          echo "--- COMPILANDO ---"
-          # LLVM_IAS=0 usa o assembler do GCC, evitando o erro de lixo (junk)
+          echo "--- INICIANDO COMPILAÇÃO ---"
+          # Compila usando todas as CPUs disponíveis para ser rápido
           make -j$(nproc --all) O=out \
           CC=clang-15 \
           LD=ld.lld-15 \
@@ -77,5 +78,5 @@ jobs:
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_Ultimate_vDSO_Fixed
+          name: Kernel_A23_KSU_Android16_Final
           path: out/arch/arm64/boot/Image
