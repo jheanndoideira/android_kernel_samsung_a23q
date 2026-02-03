@@ -1,4 +1,4 @@
-name: Build Wonderful Kernel A23 with KernelSU
+name: Build Wonderful Kernel A23 - ESTÁVEL FINAL
 
 on:
   workflow_dispatch:
@@ -22,7 +22,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Add KernelSU
+      - name: Add KernelSU (Original)
         run: |
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
@@ -31,7 +31,7 @@ jobs:
           git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 --single-branch -b master aosp-clang/clang
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 --single-branch -b android-14.0.0_r0.47 aosp-clang/gcc64
           
-      - name: Build Kernel (AGORA VAI)
+      - name: Build Kernel (Fix Global Memcpy)
         run: |
           CLANG_BIN="$GITHUB_WORKSPACE/aosp-clang/clang/bin"
           GCC_BIN="$GITHUB_WORKSPACE/aosp-clang/gcc64/bin"
@@ -43,14 +43,19 @@ jobs:
           make mrproper
           mkdir -p out
           
-          echo "--- APLICANDO O MAPA ENCONTRADO: rsuntk_defconfig ---"
-          
-          # AQUI ESTÁ A CORREÇÃO: Usando o nome exato que apareceu no seu log
+          # Carrega o mapa personalizado
           make O=out rsuntk_defconfig
           
-          echo "--- INICIANDO COMPILAÇÃO ---"
-          # Mantive os comandos para evitar erros bobos e o erro de BTF
-          make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w" CONFIG_DEBUG_INFO_BTF=n
+          # Responde 'Sim' para as novas funções do Android 16/KernelSU
+          yes "" | make O=out oldconfig
+          
+          echo "--- INICIANDO COMPILAÇÃO FINAL ---"
+          # KCFLAGS corrigem o erro de 'memcpy binding' e ignoram avisos
+          make -j2 O=out CC=clang LLVM=1 LLVM_IAS=1 \
+          KCFLAGS="-w -fno-builtin-memcpy -fno-builtin-memmove -fno-builtin-memset -fno-builtin-stpcpy" \
+          CONFIG_DEBUG_INFO_BTF=n \
+          CONFIG_SYSTEM_TRUSTED_KEYS="" \
+          CONFIG_SYSTEM_REVOCATION_KEYS=""
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
