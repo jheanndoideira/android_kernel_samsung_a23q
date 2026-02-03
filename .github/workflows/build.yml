@@ -19,19 +19,21 @@ jobs:
           
       - name: Setup Kernel Source
         uses: actions/checkout@v4
+        with:
+          path: kernel-source
 
-      - name: Add KernelSU Next (Com Susfs)
+      - name: Add KernelSU
         run: |
-          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next-susfs/kernel/setup.sh" | bash -s next-susfs
+          cd kernel-source
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-      - name: Download Google Build Tools (O segredo do erro 2)
+      - name: Download Google Build Tools
         run: |
           git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 -b master aosp-clang/clang
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android-14.0.0_r0.47 --depth=1 aosp-clang/gcc64
           
       - name: Build Kernel
         run: |
-          # Configura os caminhos dos compiladores do Google
           CLANG="$GITHUB_WORKSPACE/aosp-clang/clang/bin"
           GCC64="$GITHUB_WORKSPACE/aosp-clang/gcc64/bin"
           export PATH=$CLANG:$GCC64:$PATH
@@ -39,15 +41,14 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
           
-          # Tenta o mapa do A23Q (Baseado no seu relato)
-          # Se o bengal_a23.confi que você achou for o real, vamos tentar ele também
+          cd kernel-source
+          # Tenta o mapa do A23Q
           make O=out vendor/a23q_eur_open_defconfig || make O=out a23q_defconfig || make O=out bengal_defconfig
           
-          # Compilação usando LLVM (Padrão Samsung)
           make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1
 
-      - name: Upload Image (O Kernel)
+      - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
           name: Kernel_A23_KSU
-          path: out/arch/arm64/boot/Image
+          path: kernel-source/out/arch/arm64/boot/Image
