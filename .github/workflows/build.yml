@@ -1,4 +1,4 @@
-name: Build Kernel A23 - PROTOTYPE FIX
+name: Build Kernel A23 - FINAL SYNTAX FIX
 
 on:
   workflow_dispatch:
@@ -25,29 +25,31 @@ jobs:
           
       - name: Compilar Kernel
         run: |
+          # 1. DEFINIR VARIÁVEIS GLOBAIS
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export KBUILD_MODPOST_WARN=1
           
           mkdir -p out
           
-          # --- CORREÇÕES DE CÓDIGO (PATCHES) ---
-          # 1. Fix vDSO
+          # --- CORREÇÕES DE CÓDIGO ---
+          # Fix vDSO
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
           
-          # 2. Fix Strict Prototypes (O erro que você achou!)
+          # Fix Strict Prototypes
           sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
           
           # --- CONFIGURAÇÃO ---
           make O=out rsuntk_defconfig
           
-          # Responde 'Enter' para tudo (Anti-End-of-File)
+          # Aceita as configs novas (como o INIT_STACK que apareceu no seu erro)
           yes "" | make O=out olddefconfig
           
           # --- COMPILAÇÃO ---
           echo "--- INICIANDO COMPILAÇÃO ---"
-          # Adicionamos -Wno-error para evitar que pequenos avisos virem erros fatais
+          # Passamos as variáveis antes do 'make' para evitar erro de 'No rule to make target'
           yes "" | make -j$(nproc --all) O=out \
           CC=clang-15 \
           LD=ld.lld-15 \
@@ -57,7 +59,6 @@ jobs:
           OBJDUMP=llvm-objdump-15 \
           STRIP=llvm-strip-15 \
           LLVM_IAS=0 \
-          KBUILD_MODPOST_WARN=1 \
           KCFLAGS="-w -Wno-error -fno-builtin -fcommon" \
           Image
 
