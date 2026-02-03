@@ -1,4 +1,4 @@
-name: Build Wonderful Kernel A23 - FINAL STABLE FIX
+name: Build Wonderful Kernel A23 - ASSEMBLER FIX
 
 on:
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
           git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 --single-branch -b master aosp-clang/clang
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 --single-branch -b android-14.0.0_r0.47 aosp-clang/gcc64
           
-      - name: Build Kernel (Fix SSL & Memcpy)
+      - name: Build Kernel (Fix vgettimeofday)
         run: |
           CLANG_BIN="$GITHUB_WORKSPACE/aosp-clang/clang/bin"
           GCC_BIN="$GITHUB_WORKSPACE/aosp-clang/gcc64/bin"
@@ -43,30 +43,26 @@ jobs:
           make mrproper
           mkdir -p out
           
-          # Carrega a configuração do seu kernel
+          # Configuração do Kernel
           make O=out rsuntk_defconfig
-          
-          # Aceita as novas funções do Android 16 automaticamente
           make O=out olddefconfig
           
-          echo "--- DESATIVANDO TRAVAS DE ASSINATURA ---"
-          # Isso resolve o erro 'SSL error' e 'extract-cert'
+          echo "--- LIMPANDO TRAVAS DE SEGURANÇA ---"
           scripts/config --file out/.config --disable MODULE_SIG
           scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
           scripts/config --file out/.config --disable SYSTEM_REVOCATION_LIST
           
-          echo "--- INICIANDO COMPILAÇÃO ---"
-          # LLVM_IAS=0 resolve o erro de memcpy
-          # KCFLAGS -fno-builtin reforça a correção
-          make -j2 O=out CC=clang LLVM=1 LLVM_IAS=0 \
-          KCFLAGS="-w -fno-builtin" \
+          echo "--- INICIANDO COMPILAÇÃO (MODO LLVM-IAS) ---"
+          # LLVM_IAS=1 resolve o erro 'junk at end of line' no vgettimeofday
+          # KCFLAGS corrigem o erro de redefinição de memcpy e KernelSU
+          make -j2 O=out CC=clang LLVM=1 LLVM_IAS=1 \
+          KCFLAGS="-w -fno-builtin -Wno-implicit-function-declaration -fno-stack-protector" \
           CONFIG_DEBUG_INFO_BTF=n \
           CONFIG_SYSTEM_TRUSTED_KEYS="" \
-          CONFIG_SYSTEM_REVOCATION_KEYS="" \
           CONFIG_MODULE_SIG=n
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_KSU_Final
+          name: Kernel_A23_KSU_Fix_Assembler
           path: out/arch/arm64/boot/Image
