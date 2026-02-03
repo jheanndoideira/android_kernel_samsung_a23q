@@ -1,4 +1,4 @@
-name: Build Kernel A23 - vDSO STACK FIX
+name: Build Kernel A23 - FINAL vDSO FIX
 
 on:
   workflow_dispatch:
@@ -23,30 +23,31 @@ jobs:
           sudo apt update
           sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           
-      - name: Build Kernel (Fixing vDSO Relocation)
+      - name: Build Kernel (Surgical Relocation Fix)
         run: |
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           
-          # --- LIMPEZA CIRÚRGICA DO vDSO ---
-          # 1. Removemos todas as menções a stack-protector no vDSO
+          # --- A MARRETA NO VDSO ---
+          # 1. Forçamos o Makefile do vDSO a desativar o Stack Protector em todas as frentes
+          sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fno-stack-protector -fPIC/g' arch/arm64/kernel/vdso/Makefile
+          
+          # 2. Limpamos as flags que causam o "Junk" e as Relocations
           sed -i 's/-fstack-protector//g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/-fstack-protector-strong//g' arch/arm64/kernel/vdso/Makefile
-          sed -i 's/-fstack-protector-all//g' arch/arm64/kernel/vdso/Makefile
-          
-          # 2. Forçamos o vDSO a ser compilado sem essas flags (Fix do erro de Relocation)
-          echo "CFLAGS_REMOVE_vgettimeofday.o = -fstack-protector -fstack-protector-strong -fstack-protector-all" >> arch/arm64/kernel/vdso/Makefile
-          
-          # 3. Limpeza do Junk (Sua descoberta)
           sed -i 's/-fno-asynchronous-unwind-tables//g' arch/arm64/kernel/vdso/Makefile
+          
+          # 3. Injetamos um comando para garantir que o compilador ignore a proteção de pilha aqui
+          echo "CFLAGS_vgettimeofday.o = -fno-stack-protector -fPIC" >> arch/arm64/kernel/vdso/Makefile
+          echo "CFLAGS_gettimeofday.o = -fno-stack-protector -fPIC" >> arch/arm64/kernel/vdso/Makefile
 
           make mrproper
           mkdir -p out
           make O=out rsuntk_defconfig
           
-          # Ajustes Anti-Panic e GSI Android 16
+          # Ajustes GSI Android 16 e Segurança
           scripts/config --file out/.config --disable MODULE_SIG
           scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
           scripts/config --file out/.config --disable STACKPROTECTOR
@@ -55,7 +56,7 @@ jobs:
           yes "" | make O=out oldconfig
           
           echo "--- COMPILANDO ---"
-          # LLVM_IAS=0 é vital para o vDSO da Samsung!
+          # LLVM_IAS=0 mantém o assembler estável que você validou
           make -j$(nproc --all) O=out \
           CC=clang-15 \
           LD=ld.lld-15 \
@@ -70,5 +71,5 @@ jobs:
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_vDSO_Fixed
+          name: Kernel_A23_vDSO_Success
           path: out/arch/arm64/boot/Image
