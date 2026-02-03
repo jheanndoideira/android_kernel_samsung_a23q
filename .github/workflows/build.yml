@@ -1,11 +1,11 @@
-name: Build Kernel A23 - FINAL SYNTAX FIX
+name: Build Kernel A23 - TURBO PERFORMANCE
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Kernel
+    name: Build Kernel Performance
     runs-on: ubuntu-latest
     
     steps:
@@ -34,22 +34,29 @@ jobs:
           
           mkdir -p out
           
-          # --- CORREÇÕES DE CÓDIGO ---
-          # Fix vDSO
+          # --- CORREÇÕES DE CÓDIGO (PATCHES) ---
+          # Fix vDSO (Android 16/Modern Clang)
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
           
-          # Fix Strict Prototypes
+          # Fix Strict Prototypes (Erro SSC Core)
           sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
           
-          # --- CONFIGURAÇÃO ---
+          # --- CONFIGURAÇÃO INICIAL ---
           make O=out rsuntk_defconfig
           
-          # Aceita as configs novas (como o INIT_STACK que apareceu no seu erro)
-          yes "" | make O=out olddefconfig
+          # --- TUNING DE PERFORMANCE (DESATIVANDO FREIOS) ---
+          scripts/config --file out/.config --disable REFCOUNT_FULL
+          scripts/config --file out/.config --disable PANIC_ON_REFCOUNT_ERROR
+          scripts/config --file out/.config --disable SHADOW_CALL_STACK
+          scripts/config --file out/.config --disable STACKPROTECTOR_STRONG
           
-          # --- COMPILAÇÃO ---
-          echo "--- INICIANDO COMPILAÇÃO ---"
-          # Passamos as variáveis antes do 'make' para evitar erro de 'No rule to make target'
+          # --- RESPOSTAS PARA O MENU (LTO, POLLY, RELR, INIT_STACK) ---
+          # Sequência: 2 (LTO Full), n (No Polly), y (RELR), 1 (No Stack Init)
+          printf "2\nn\ny\n1\n" | make O=out olddefconfig
+          
+          # --- COMPILAÇÃO REAL COM OTIMIZAÇÃO -O3 ---
+          echo "--- INICIANDO COMPILAÇÃO TURBO ---"
+          # -O3 foca em performance bruta do código
           yes "" | make -j$(nproc --all) O=out \
           CC=clang-15 \
           LD=ld.lld-15 \
@@ -59,20 +66,21 @@ jobs:
           OBJDUMP=llvm-objdump-15 \
           STRIP=llvm-strip-15 \
           LLVM_IAS=0 \
-          KCFLAGS="-w -Wno-error -fno-builtin -fcommon" \
+          KCFLAGS="-O3 -w -Wno-error -fno-builtin -fcommon" \
           Image
 
-      - name: Verificar e Upload
+      - name: Verificar e Preparar Arquivo
         run: |
           if [ -f out/arch/arm64/boot/Image ]; then
-            cp out/arch/arm64/boot/Image ./boot-A23-KSU.img
+            echo "SUCESSO: Kernel de Performance Gerado!"
+            cp out/arch/arm64/boot/Image ./boot-A23-Turbo.img
           else
-            echo "Erro: Image não gerada."
+            echo "Erro: O arquivo Image não foi encontrado."
             exit 1
           fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_KSU_Final
-          path: ./boot-A23-KSU.img
+          name: Kernel_A23_Turbo_KSU
+          path: ./boot-A23-Turbo.img
