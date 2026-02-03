@@ -1,0 +1,6 @@
+- name: Upload do Kernel Final
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel_A23_KSU_Final
+          path: out/arch/arm64/boot/Image
+          if-no-files-found: error # Isso te avisa se o arquivo não foi gerado
