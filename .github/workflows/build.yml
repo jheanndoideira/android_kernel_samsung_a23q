@@ -1,4 +1,4 @@
-name: Build Kernel A23 - GSI Android 16 FINAL
+name: Build Kernel A23 - NATHAN WIKI FIX
 
 on:
   workflow_dispatch:
@@ -20,44 +20,39 @@ jobs:
           
       - name: Download Tools
         run: |
-          # Baixando ferramentas em locais limpos
           git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 $GITHUB_WORKSPACE/clang-tools
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 $GITHUB_WORKSPACE/gcc-tools
           
-      - name: Build Kernel (Auto Path Detection)
+      - name: Build Kernel (Cleaning Junk like Nathan)
         run: |
-          # LOCALIZAÇÃO AUTOMÁTICA (Para nunca mais dar 'Not Found')
-          CLANG_PATH=$(find $GITHUB_WORKSPACE/clang-tools -name clang -type f -executable | head -n 1 | xargs dirname)
-          GCC_PATH=$(find $GITHUB_WORKSPACE/gcc-tools -name "aarch64-linux-android-gcc" -type f -executable | head -n 1 | xargs dirname)
+          # Achar os compiladores
+          CLANG_BIN=$(find $GITHUB_WORKSPACE/clang-tools -name clang -type f -executable | head -n 1 | xargs dirname)
+          GCC_BIN=$(find $GITHUB_WORKSPACE/gcc-tools -name "aarch64-linux-android-gcc" -type f -executable | head -n 1 | xargs dirname)
+          export PATH="$CLANG_BIN:$GCC_BIN:$PATH"
           
-          if [ -z "$CLANG_PATH" ] || [ -z "$GCC_PATH" ]; then
-            echo "ERRO: Compiladores não encontrados!"
-            exit 1
-          fi
-
-          export PATH="$CLANG_PATH:$GCC_PATH:$PATH"
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
-          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           
-          # Fix do vDSO (Aquele que você descobriu que resolve o Junk)
+          # A LIÇÃO DO NATHAN: Limpar as diretivas que o assembler não entende
+          # Removemos flags que injetam "lixo" (caracteres especiais) no assembly do vDSO
           sed -i 's/-fno-asynchronous-unwind-tables//g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/-fno-stack-protector//g' arch/arm64/kernel/vdso/Makefile
-          echo "CFLAGS_REMOVE_vgettimeofday.o = -fstack-protector -fstack-protector-strong" >> arch/arm64/kernel/vdso/Makefile
-
+          sed -i 's/-fstack-protector-strong//g' arch/arm64/kernel/vdso/Makefile
+          sed -i 's/-fstack-protector//g' arch/arm64/kernel/vdso/Makefile
+          
           make mrproper
           mkdir -p out
           make O=out rsuntk_defconfig
           
-          # Ajustes para GSI e Android 16
+          # Desativar travas (essencial para GSI Android 16)
           scripts/config --file out/.config --disable MODULE_SIG
           scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
           
           yes "" | make O=out oldconfig
           
-          echo "--- COMPILANDO AGORA ---"
-          # LLVM_IAS=0 usa o montador do GCC que aceita o código da Samsung
+          echo "--- COMPILANDO SEM LIXO ---"
+          # LLVM_IAS=0 força o uso do assembler do GCC (que agora receberá código limpo)
           yes "" | make -j$(nproc --all) O=out \
           CC=clang \
           LLVM=1 \
@@ -67,5 +62,5 @@ jobs:
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_GSI_Final
+          name: Kernel_A23_Nathan_Fix
           path: out/arch/arm64/boot/Image
