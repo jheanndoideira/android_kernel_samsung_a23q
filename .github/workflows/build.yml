@@ -1,4 +1,4 @@
-name: Build Wonderful Kernel A23 - FINAL STRIKE
+name: Build Wonderful Kernel A23 - ISOLATION FIX
 
 on:
   workflow_dispatch:
@@ -9,11 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Installing Dependencies
-        run: |
-          sudo apt update -y
-          sudo apt install -y lld binutils clang llvm zip flex bison libncurses-dev gawk libiberty-dev autoconf kmod bc build-essential gcc libc6 curl libstdc++6 git wget libssl-dev cpio p7zip-full ccache
-          
       - name: Setup Kernel Source
         uses: actions/checkout@v4
         with:
@@ -28,35 +23,34 @@ jobs:
           git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 --single-branch -b master aosp-clang/clang
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 --single-branch -b android-14.0.0_r0.47 aosp-clang/gcc64
           
-      - name: Build Kernel (The Real Fix)
+      - name: Build Kernel (Absolute Isolation)
         run: |
-          # Caminhos Absolutos
           export CLANG_PATH="$GITHUB_WORKSPACE/aosp-clang/clang/bin"
           export GCC_PATH="$GITHUB_WORKSPACE/aosp-clang/gcc64/bin"
           export PATH="$CLANG_PATH:$GCC_PATH:$PATH"
-          
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
+
+          # --- TÉCNICA DE ISOLAMENTO (Baseado na sua descoberta) ---
+          # 1. Limpa as flags que geram caracteres especiais (aspas/lixo) no vDSO
+          sed -i 's/$(arm64_stack_protector_flags)//g' arch/arm64/kernel/vdso/Makefile
           
-          # LIMPEZA DE "LIXO" NO MAKEFILE DO VDSO (Sua análise em ação!)
-          # Removemos tudo que gera aspas ou instruções que o Assembler Host tentaria ler
-          sed -i 's/-fno-asynchronous-unwind-tables//g' arch/arm64/kernel/vdso/Makefile
-          sed -i 's/-fno-stack-protector//g' arch/arm64/kernel/vdso/Makefile
-          sed -i 's/-pg//g' arch/arm64/kernel/vdso/Makefile
-          
+          # 2. Força o vDSO a ignorar as flags de depuração do Clang que causam o erro
+          echo "CFLAGS_REMOVE_vgettimeofday.o = -fstack-protector -fstack-protector-strong -fno-strict-overflow" >> arch/arm64/kernel/vdso/Makefile
+
           make mrproper
           mkdir -p out
           make O=out rsuntk_defconfig
           
-          # Desativa travas de segurança
+          # Desativa as travas de boot da Samsung
           scripts/config --file out/.config --disable MODULE_SIG
           scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
           
           yes "" | make O=out oldconfig
           
           echo "--- COMPILANDO ---"
-          # Forçamos o uso do CROSS_COMPILE do GCC para o Assembler (LLVM_IAS=0)
+          # LLVM_IAS=0 é vital: ele usa o assembler do GCC que não se perde com aspas
           yes "" | make -j$(nproc --all) O=out \
           CC="$CLANG_PATH/clang" \
           CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -64,9 +58,3 @@ jobs:
           LLVM=1 \
           LLVM_IAS=0 \
           KCFLAGS="-w -fno-builtin -fcommon"
-
-      - name: Upload Image
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kernel_A23_Final_Success
-          path: out/arch/arm64/boot/Image
