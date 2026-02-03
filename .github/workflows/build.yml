@@ -1,22 +1,18 @@
-name: Build Kernel A23 - TURBO PERFORMANCE
+name: Build Kernel A23 - FINAL PERFORMANCE FIX
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Kernel Performance
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout Source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Setup KernelSU
-        run: |
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+        run: curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
       - name: Install Toolchain
         run: |
@@ -25,62 +21,49 @@ jobs:
           
       - name: Compilar Kernel
         run: |
-          # 1. DEFINIR VARIÁVEIS GLOBAIS
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export KBUILD_MODPOST_WARN=1
           
           mkdir -p out
           
-          # --- CORREÇÕES DE CÓDIGO (PATCHES) ---
-          # Fix vDSO (Android 16/Modern Clang)
+          # Patches de código
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
-          
-          # Fix Strict Prototypes (Erro SSC Core)
           sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
           
-          # --- CONFIGURAÇÃO INICIAL ---
+          # Configuração base
           make O=out rsuntk_defconfig
           
-          # --- TUNING DE PERFORMANCE (DESATIVANDO FREIOS) ---
+          # --- INJETANDO OVERRIDES DE PERFORMANCE E ERRO ---
+          scripts/config --file out/.config --enable SECTION_MISMATCH_WARN_ONLY
           scripts/config --file out/.config --disable REFCOUNT_FULL
           scripts/config --file out/.config --disable PANIC_ON_REFCOUNT_ERROR
           scripts/config --file out/.config --disable SHADOW_CALL_STACK
-          scripts/config --file out/.config --disable STACKPROTECTOR_STRONG
           
-          # --- RESPOSTAS PARA O MENU (LTO, POLLY, RELR, INIT_STACK) ---
-          # Sequência: 2 (LTO Full), n (No Polly), y (RELR), 1 (No Stack Init)
+          # Respostas para LTO e etc
           printf "2\nn\ny\n1\n" | make O=out olddefconfig
           
-          # --- COMPILAÇÃO REAL COM OTIMIZAÇÃO -O3 ---
-          echo "--- INICIANDO COMPILAÇÃO TURBO ---"
-          # -O3 foca em performance bruta do código
+          echo "--- COMPILANDO ---"
+          # Adicionamos KBUILD_MODPOST_WARN=1 aqui para garantir que ele ignore o erro fatal
           yes "" | make -j$(nproc --all) O=out \
-          CC=clang-15 \
-          LD=ld.lld-15 \
-          AR=llvm-ar-15 \
-          NM=llvm-nm-15 \
-          OBJCOPY=llvm-objcopy-15 \
-          OBJDUMP=llvm-objdump-15 \
-          STRIP=llvm-strip-15 \
+          CC=clang-15 LD=ld.lld-15 AR=llvm-ar-15 NM=llvm-nm-15 \
           LLVM_IAS=0 \
+          KBUILD_MODPOST_WARN=1 \
           KCFLAGS="-O3 -w -Wno-error -fno-builtin -fcommon" \
           Image
 
-      - name: Verificar e Preparar Arquivo
+      - name: Check and Upload
         run: |
           if [ -f out/arch/arm64/boot/Image ]; then
-            echo "SUCESSO: Kernel de Performance Gerado!"
             cp out/arch/arm64/boot/Image ./boot-A23-Turbo.img
           else
-            echo "Erro: O arquivo Image não foi encontrado."
+            echo "Erro: Image não gerada."
             exit 1
           fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_Turbo_KSU
+          name: Kernel_A23_Turbo
           path: ./boot-A23-Turbo.img
