@@ -9,6 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+      - name: Cleanup Server
+        uses: rokibhasansagar/slimhub_actions@main
+
       - name: Installing Dependencies
         run: |
           sudo apt update -y
@@ -16,19 +19,23 @@ jobs:
           
       - name: Setup Kernel Source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Add KernelSU
         run: |
+          # Baixa o KernelSU Oficial Estável
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-      - name: Download Google Build Tools (VERSÃO LEVE)
+      - name: Download Google Build Tools (TURBO)
         run: |
-          # O segredo é o --depth=1 e --single-branch. Isso baixa só o que importa agora.
+          # Baixando apenas o essencial para economizar tempo e evitar travamentos
           git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 --single-branch -b master aosp-clang/clang
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 --single-branch -b android-14.0.0_r0.47 aosp-clang/gcc64
           
-      - name: Build Kernel
+      - name: Build Kernel (Modo Detetive)
         run: |
+          # Configura os caminhos absolutos
           CLANG_BIN="$GITHUB_WORKSPACE/aosp-clang/clang/bin"
           GCC_BIN="$GITHUB_WORKSPACE/aosp-clang/gcc64/bin"
           export PATH="$CLANG_BIN:$GCC_BIN:$PATH"
@@ -36,15 +43,25 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
           
-          # Limpeza total antes de começar
+          echo "--- INICIANDO DIAGNÓSTICO DE ARQUIVOS ---"
+          # Isso vai mostrar no log quais mapas existem, caso dê erro
+          ls -R arch/arm64/configs
+          echo "-----------------------------------------"
+          
           make mrproper
           mkdir -p out
           
-          # Escolha do mapa (Priorizando o seu A23)
-          make O=out vendor/a23q_eur_open_defconfig || make O=out a23q_defconfig || make O=out bengal_defconfig
+          echo "--- TENTANDO ENCONTRAR O MAPA CORRETO ---"
+          # Tenta 4 nomes comuns para o A23/Bengal. O '||' significa "se falhar, tente o próximo"
+          make O=out vendor/a23q_eur_open_defconfig \
+          || make O=out vendor/bengal_defconfig \
+          || make O=out a23q_defconfig \
+          || make O=out bengal_defconfig \
+          || make O=out vendor/bengal-perf_defconfig
           
-          # Início da compilação real
-          make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1
+          echo "--- INICIANDO COMPILAÇÃO ---"
+          # Inicia o build ignorando avisos não-fatais (-w)
+          make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 KCFLAGS="-w"
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
