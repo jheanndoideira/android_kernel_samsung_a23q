@@ -1,56 +1,51 @@
-name: Build Kernel A23 - FINAL RELEASE
+name: Build Kernel A23 - FORÇA BRUTA FINAL
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Kernel For A23
+    name: Build Kernel
     runs-on: ubuntu-latest
     
     steps:
-      - name: Setup Kernel Source
+      - name: Checkout Source
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Add KernelSU
+      - name: Setup KernelSU
         run: |
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-      - name: Install Compilers
+      - name: Install Toolchain
         run: |
           sudo apt update
           sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           
-      - name: Build Kernel (Image Only)
+      - name: Compilar Kernel
         run: |
+          # 1. Variáveis de Ambiente
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           
-          # 1. FIX VDSO (Resolve erro de Android 16)
+          # 2. Correção de caminho e vDSO
+          mkdir -p out
           VDSO_MAKEFILE="arch/arm64/kernel/vdso/Makefile"
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' $VDSO_MAKEFILE
           
-          # 2. PREPARAÇÃO DA CONFIG
-          make mrproper
-          mkdir -p out
+          # 3. Configuração Inicial
           make O=out rsuntk_defconfig
           
-          # 3. SEGURANÇA E BYPASS (Para celular sem botão power)
-          scripts/config --file out/.config --disable MODULE_SIG
-          scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
-          scripts/config --file out/.config --disable PANIC_ON_OOPS
-          scripts/config --file out/.config --set-val PANIC_TIMEOUT 0
+          # 4. O PULO DO GATO: O comando 'yes' responde 'Enter' para todas as perguntas chatas
+          echo "--- RESOLVENDO CONFIGS NOVAS ---"
+          yes "" | make O=out olddefconfig
           
-          # Aceita configs novas automaticamente (evita erro End of File)
-          make O=out olddefconfig
-          
-          echo "--- COMPILANDO IMAGE (COM BYPASS DE MODPOST) ---"
-          # KBUILD_MODPOST_WARN=1 é a chave para ignorar os erros que você postou
-          make -j$(nproc --all) O=out \
+          # 5. COMPILAÇÃO REAL (Foco na Image)
+          echo "--- INICIANDO COMPILAÇÃO (AGUARDE 10-20 MIN) ---"
+          yes "" | make -j$(nproc --all) O=out \
           CC=clang-15 \
           LD=ld.lld-15 \
           AR=llvm-ar-15 \
@@ -59,22 +54,4 @@ jobs:
           OBJDUMP=llvm-objdump-15 \
           STRIP=llvm-strip-15 \
           LLVM_IAS=0 \
-          KBUILD_MODPOST_WARN=1 \
-          KCFLAGS="-w -fno-builtin -fcommon" \
-          Image
-
-      - name: Check and Prepare Artifact
-        run: |
-          if [ -f out/arch/arm64/boot/Image ]; then
-            echo "SUCESSO: Kernel gerado!"
-            cp out/arch/arm64/boot/Image ./boot-A23.img
-          else
-            echo "ERRO: Image não encontrada!"
-            exit 1
-          fi
-
-      - name: Upload Kernel
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kernel_A23_KSU_Final
-          path: ./boot-A23.img
+          KBUILD_MODPOST
