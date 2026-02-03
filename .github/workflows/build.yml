@@ -1,52 +1,61 @@
-name: Build Kernel A23 - LASER FOCUS FINAL
+name: Build Kernel A23 - FIXED PATH
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Kernel For A23
     runs-on: ubuntu-latest
     
     steps:
       - name: Setup Kernel Source
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
       - name: Add KernelSU
-        run: |
-          # Injeção direta do KernelSU no código fonte
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+        run: curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
       - name: Install Compilers
         run: |
           sudo apt update
-          # Instalando o toolkit LLVM/Clang e GCC para ARM64
           sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           
-      - name: Build Kernel (Image Only)
+      - name: Build Kernel
         run: |
-          export ARCH=arm64
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          # Definindo as variáveis diretamente no comando para não haver erro de "Target not found"
+          make O=out rsuntk_defconfig ARCH=arm64
           
-          # FIX VDSO: Resolve o erro de Relocation que você encontrou antes
-          VDSO_MAKEFILE="arch/arm64/kernel/vdso/Makefile"
-          sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' $VDSO_MAKEFILE
+          # Fix vDSO
+          sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
           
-          # PREPARAÇÃO
-          make mrproper
-          mkdir -p out
-          make O=out rsuntk_defconfig
+          # Desativa travas
+          scripts/config --file out/.config --disable MODULE_SIG --disable SYSTEM_TRUSTED_KEYRING --disable PANIC_ON_OOPS
           
-          # SEGURANÇA GSI E BOTÃO POWER
-          # Desativa pânico e assinaturas para garantir o boot no Android 16
-          scripts/config --file out/.config --disable MODULE_SIG
-          scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
-          scripts/config --file out/.config --disable PANIC_ON_OOPS
-          scripts/config --file out/.config --set-val PANIC_TIMEOUT 0
+          make O=out olddefconfig ARCH=arm64
           
-          # RESOLVE O ERRO "END OF FILE": Aceita novas configs do Android 16 automaticamente
-          make O=out olddefconfig
+          # COMANDO DE COMPILAÇÃO CORRIGIDO
+          make -j$(nproc --all) O=out \
+          ARCH=arm64 \
+          CC=clang-15 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+          LD=ld.lld-15 \
+          LLVM_IAS=0 \
+          Image
+
+      - name: Check and Move Image
+        run: |
+          # Verifica se o arquivo existe antes de tentar o upload
+          if [ -f out/arch/arm64/boot/Image ]; then
+            echo "Kernel gerado com sucesso!"
+            cp out/arch/arm64/boot/Image ./Image-A23
+          else
+            echo "ERRO: O arquivo Image não foi encontrado em out/arch/arm64/boot/"
+            exit 1
+          fi
+
+      - name: Upload Kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel_A23_Final
+          path: ./Image-A23
