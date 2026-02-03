@@ -1,4 +1,4 @@
-name: Build Wonderful Kernel A23 - FINAL SUCCESS
+name: Build Wonderful Kernel A23 - FINAL STRIKE
 
 on:
   workflow_dispatch:
@@ -23,38 +23,38 @@ jobs:
           git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 --single-branch -b master aosp-clang/clang
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 --single-branch -b android-14.0.0_r0.47 aosp-clang/gcc64
           
-      - name: Build Kernel (The Correct One)
+      - name: Build Kernel (Expert Fix Final)
         run: |
-          # 1. Definindo Caminhos (Sem erro de aspas agora)
-          CLANG_PATH="$GITHUB_WORKSPACE/aosp-clang/clang/bin"
-          GCC_PATH="$GITHUB_WORKSPACE/aosp-clang/gcc64/bin"
+          # 1. Definindo Caminhos Absolutos
+          export CLANG_PATH="$GITHUB_WORKSPACE/aosp-clang/clang/bin"
+          export GCC_PATH="$GITHUB_WORKSPACE/aosp-clang/gcc64/bin"
           export PATH="$CLANG_PATH:$GCC_PATH:$PATH"
           
+          # 2. Variáveis de Ambiente
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
-          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           
-          # 2. Fix do vDSO que matou o "Junk"
-          # Removemos flags que fazem o Assembler se perder
+          # 3. PULO DO GATO (Fix do vDSO que mata o Junk)
           sed -i 's/-fno-asynchronous-unwind-tables//g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/-fno-stack-protector//g' arch/arm64/kernel/vdso/Makefile
-          echo "CFLAGS_REMOVE_vgettimeofday.o = -fstack-protector -fstack-protector-strong" >> arch/arm64/kernel/vdso/Makefile
-
-          # 3. Preparação Profunda
+          
+          # 4. Limpeza e Configuração
           make mrproper
+          rm -rf out
           mkdir -p out
           make O=out rsuntk_defconfig
           
-          # 4. Desativar travas Samsung (Importante para o boot!)
+          # 5. Desativar travas Samsung
           scripts/config --file out/.config --disable MODULE_SIG
           scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
+          scripts/config --file out/.config --disable SYSTEM_REVOCATION_LIST
           
-          # 5. Aplicar configurações
+          # 6. Aplicar Configurações
           yes "" | make O=out oldconfig
           
           echo "--- INICIANDO COMPILAÇÃO ---"
-          # LLVM_IAS=0 usa o Assembler do GCC que você comprovou que funciona!
+          # Compilação forçando o caminho correto e fechando todas as aspas
           yes "" | make -j$(nproc --all) O=out \
           CC="$CLANG_PATH/clang" \
           CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -67,5 +67,5 @@ jobs:
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_KSU_Final
+          name: Kernel_A23_KSU_Expert_Success
           path: out/arch/arm64/boot/Image
