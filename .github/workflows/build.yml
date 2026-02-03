@@ -1,4 +1,4 @@
-name: Build Wonderful Kernel A23 - PATH FIXED
+name: Build Kernel A23 - Android 16 GSI Ready
 
 on:
   workflow_dispatch:
@@ -16,21 +16,18 @@ jobs:
 
       - name: Add KernelSU
         run: |
+          # Versão main do KernelSU para garantir suporte ao Android 16
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-      - name: Download Build Tools
+      - name: Download Tools
         run: |
-          # Baixando o Clang e o GCC em pastas simples
-          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 --single-branch -b master $GITHUB_WORKSPACE/clang-tools
-          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 --single-branch -b android-14.0.0_r0.47 $GITHUB_WORKSPACE/gcc-tools
+          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 -b master $GITHUB_WORKSPACE/clang-tools
+          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 -b android-14.0.0_r0.47 $GITHUB_WORKSPACE/gcc-tools
           
-      - name: Build Kernel (Fix Not Found)
+      - name: Build Kernel (GSI Optimized)
         run: |
-          # Definindo caminhos absolutos e conferindo se existem
           CLANG_BIN="$GITHUB_WORKSPACE/clang-tools/bin"
           GCC_BIN="$GITHUB_WORKSPACE/gcc-tools/bin"
-          
-          # Garante que o executável tem permissão
           chmod +x $CLANG_BIN/clang
           
           export PATH="$CLANG_BIN:$GCC_BIN:$PATH"
@@ -39,7 +36,7 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           
-          # Fix do vDSO que você confirmou que funciona!
+          # Fix do vDSO (Mata o Junk e mantém compatibilidade GSI)
           sed -i 's/-fno-asynchronous-unwind-tables//g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/-fno-stack-protector//g' arch/arm64/kernel/vdso/Makefile
           
@@ -47,24 +44,24 @@ jobs:
           mkdir -p out
           make O=out rsuntk_defconfig
           
-          # Desativa travas
+          # Desativar travas para a GSI não reclamar no boot
           scripts/config --file out/.config --disable MODULE_SIG
           scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
+          scripts/config --file out/.config --disable SYSTEM_REVOCATION_LIST
           
           yes "" | make O=out oldconfig
           
-          echo "--- COMPILANDO ---"
-          # Usamos o comando direto para não ter erro de "not found"
+          echo "--- COMPILANDO PARA ANDROID 16 ---"
           yes "" | make -j$(nproc --all) O=out \
           CC=clang \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-android- \
           LLVM=1 \
           LLVM_IAS=0 \
+          CROSS_COMPILE=aarch64-linux-android- \
+          CROSS_COMPILE_ARM32=arm-linux-androideabi- \
           KCFLAGS="-w -fno-builtin -fcommon"
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_Final_PathFixed
+          name: Kernel_A23_GSI_Android16
           path: out/arch/arm64/boot/Image
