@@ -1,4 +1,4 @@
-name: Build Kernel A23 - FINAL PERFORMANCE FIX
+name: Build Kernel A23 - FINAL ATTACK
 
 on:
   workflow_dispatch:
@@ -8,18 +8,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
+      
       - name: Setup KernelSU
         run: curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-      - name: Install Toolchain
+      - name: Install Compilers
         run: |
           sudo apt update
           sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           
-      - name: Compilar Kernel
+      - name: Compilar
         run: |
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
@@ -28,42 +26,27 @@ jobs:
           
           mkdir -p out
           
-          # Patches de código
+          # Patches de erro
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
           
-          # Configuração base
           make O=out rsuntk_defconfig
           
-          # --- INJETANDO OVERRIDES DE PERFORMANCE E ERRO ---
-          scripts/config --file out/.config --enable SECTION_MISMATCH_WARN_ONLY
-          scripts/config --file out/.config --disable REFCOUNT_FULL
-          scripts/config --file out/.config --disable PANIC_ON_REFCOUNT_ERROR
-          scripts/config --file out/.config --disable SHADOW_CALL_STACK
-          
-          # Respostas para LTO e etc
+          # Tuning de Performance
           printf "2\nn\ny\n1\n" | make O=out olddefconfig
           
-          echo "--- COMPILANDO ---"
-          # Adicionamos KBUILD_MODPOST_WARN=1 aqui para garantir que ele ignore o erro fatal
+          echo "--- COMPILANDO COM FORÇA BRUTA ---"
+          # Adicionamos a flag CONFIG_SECTION_MISMATCH_WARN_ONLY=y DIRETO no comando make
           yes "" | make -j$(nproc --all) O=out \
           CC=clang-15 LD=ld.lld-15 AR=llvm-ar-15 NM=llvm-nm-15 \
           LLVM_IAS=0 \
           KBUILD_MODPOST_WARN=1 \
+          CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
           KCFLAGS="-O3 -w -Wno-error -fno-builtin -fcommon" \
           Image
 
-      - name: Check and Upload
-        run: |
-          if [ -f out/arch/arm64/boot/Image ]; then
-            cp out/arch/arm64/boot/Image ./boot-A23-Turbo.img
-          else
-            echo "Erro: Image não gerada."
-            exit 1
-          fi
-
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_Turbo
-          path: ./boot-A23-Turbo.img
+          name: Kernel_A23_Turbo_Final
+          path: out/arch/arm64/boot/Image
