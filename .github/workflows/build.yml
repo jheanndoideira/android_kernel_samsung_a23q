@@ -1,52 +1,109 @@
-name: Build Kernel A23 - FINAL ATTACK
+name: Build A23q Wonderful Kernel
 
 on:
   workflow_dispatch:
+    inputs:
+      REPO:
+        description: 'Link do repositório (ex: rsuntk/android_kernel_samsung_sm6225)'
+        default: 'rsuntk/android_kernel_samsung_sm6225'
+        required: true
+      BRANCH:
+        description: 'Branch do Kernel'
+        default: 'a14'
+        required: true
+      DEFCONFIG:
+        description: 'Defconfig do A23 4G'
+        default: 'a23_defconfig'
+        required: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup KernelSU
-        run: curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-          
-      - name: Install Compilers
-        run: |
-          sudo apt update
-          sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
-          
-      - name: Compilar
-        run: |
-          export ARCH=arm64
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          
-          mkdir -p out
-          
-          # Patches de erro
-          sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
-          sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
-          
-          make O=out rsuntk_defconfig
-          
-          # Tuning de Performance
-          printf "2\nn\ny\n1\n" | make O=out olddefconfig
-          
-          echo "--- COMPILANDO COM FORÇA BRUTA ---"
-          # Adicionamos a flag CONFIG_SECTION_MISMATCH_WARN_ONLY=y DIRETO no comando make
-          yes "" | make -j$(nproc --all) O=out \
-          CC=clang-15 LD=ld.lld-15 AR=llvm-ar-15 NM=llvm-nm-15 \
-          LLVM_IAS=0 \
-          KBUILD_MODPOST_WARN=1 \
-          CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
-          KCFLAGS="-O3 -w -Wno-error -fno-builtin -fcommon" \
-          Image
+    strategy:
+      matrix:
+        # Mantendo as mesmas variantes do Wonderful original
+        variant: ["Vanilla", "KernelSU Next", "KernelSU Next + SUSFS"]
 
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kernel_A23_Turbo_Final
-          path: out/arch/arm64/boot/Image
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: ${{ github.event.inputs.REPO }}
+        path: kernel_root
+        ref: ${{ github.event.inputs.BRANCH }}
+        fetch-depth: 1
+
+    - name: Prepare dependencies
+      run: |
+        sudo apt update -y
+        sudo apt install bc cpio flex bison aptitude git python-is-python3 tar perl wget curl lz4 -y
+        sudo aptitude install libssl-dev -y
+
+    - name: Fetch Toolchains (Wonderful Setup)
+      run: |
+        mkdir toolchain
+        cd toolchain
+        # GCC da rsuntk para compatibilidade
+        git clone --depth=1 https://github.com/rsuntk/toolchains.git -b androidcc-4.9 google
+        # Clang 12 (O mesmo usado no A23 5G Wonderful)
+        mkdir clang-12.0.7
+        cd clang-12.0.7
+        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12L-security-release/clang-r416183b1.tar.gz
+        tar -xvf *
+      working-directory: kernel_root
+
+    - name: Build Kernel
+      run: |
+        # Configuração de Ambiente
+        export PATH=$(pwd)/toolchain/clang-12.0.7/bin:$(pwd)/toolchain/google/bin:$PATH
+        export ARCH=arm64
+        export SUBARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-android-
+        export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+        export CLANG_TRIPLE=aarch64-linux-gnu-
+        
+        # Flags de Otimização Turbo (-O3 + LLVM)
+        export CC=clang
+        export LLVM=1
+        export LLVM_IAS=1
+        export CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3=y
+        
+        # Lógica de Variantes (KSU / SUSFS)
+        if [[ "${{ matrix.variant }}" == "KernelSU Next" ]]; then
+          export KERNELSU=true
+          export SUSFS=false
+        elif [[ "${{ matrix.variant }}" == "KernelSU Next + SUSFS" ]]; then
+          export KERNELSU=true
+          export SUSFS=true
+        else
+          export KERNELSU=false
+          export SUSFS=false
+        fi
+
+        # Compilação
+        make -C kernel_root O=out ${{ github.event.inputs.DEFCONFIG }}
+        make -j$(nproc --all) -C kernel_root O=out \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CLANG_TRIPLE=aarch64-linux-gnu-
+
+        # Criar pacote para ODIN (.tar) automaticamente
+        # Isso evita o erro de "extrair em vez de renomear"
+        cd out/arch/arm64/boot/
+        mv Image boot.img
+        tar -cvf ../../../../Turbo_Kernel_A23q.tar boot.img
+      working-directory: kernel_root
+
+    - name: Upload Odin Flashable (.tar)
+    # Este arquivo você joga direto no campo AP do Odin
+      uses: actions/upload-artifact@v4
+      with:
+        name: Kernel-${{ matrix.variant }}-A23q-Odin
+        path: Turbo_Kernel_A23q.tar
+
+    - name: Upload Raw Image (Para TWRP)
+      uses: actions/upload-artifact@v4
+      with:
+        name: Image-${{ matrix.variant }}-A23q
+        path: kernel_root/out/arch/arm64/boot/boot.img
