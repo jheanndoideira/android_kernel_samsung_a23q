@@ -1,4 +1,4 @@
-name: Build Kernel A23 - FINAL BLINDADO
+name: Build Kernel A23 - GSI Android 16 FINAL SUCCESS
 
 on:
   workflow_dispatch:
@@ -16,58 +16,49 @@ jobs:
 
       - name: Add KernelSU
         run: |
-          # Usando a versão estável para evitar erros no Android 16
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-      - name: Download Tools
+      - name: Install Compilers Directly
         run: |
-          # Clonando as ferramentas - Note que usamos pastas diferentes para evitar conflito
-          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 $GITHUB_WORKSPACE/clang_tools
-          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 $GITHUB_WORKSPACE/gcc_tools
+          sudo apt update
+          sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           
-      - name: Build Kernel (The Real Success)
+      - name: Build Kernel (Ubuntu Toolchain Fix)
         run: |
-          # 1. LOCALIZAÇÃO DINÂMICA (A lanterna no corredor escuro)
-          CLANG_PATH=$(find $GITHUB_WORKSPACE/clang_tools -name clang -type f -executable | head -n 1 | xargs dirname)
-          GCC_PATH=$(find $GITHUB_WORKSPACE/gcc_tools -name aarch64-linux-android-gcc -type f -executable | head -n 1 | xargs dirname)
-          
-          echo "Sucesso! Clang encontrado em: $CLANG_PATH"
-          echo "Sucesso! GCC encontrado em: $GCC_PATH"
-          
-          export PATH="$CLANG_PATH:$GCC_PATH:$PATH"
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
-          export CROSS_COMPILE=aarch64-linux-android-
-          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           
-          # 2. FIX DO NATHAN (Lixo no fim da linha / Junk)
-          # Isso limpa as flags de assembly que causam o erro no vDSO
+          # FIX DO NATHAN (Lixo no fim da linha / Junk)
           sed -i 's/-fno-asynchronous-unwind-tables//g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/-fno-stack-protector//g' arch/arm64/kernel/vdso/Makefile
           
-          # 3. LIMPEZA E CONFIGURAÇÃO
           make mrproper
           mkdir -p out
           make O=out rsuntk_defconfig
           
-          # 4. AJUSTES PARA GSI E ANDROID 16
-          # Desativa assinaturas que bloqueiam o boot em Custom ROMs
+          # Ajustes Essenciais para GSI Android 16
           scripts/config --file out/.config --disable MODULE_SIG
           scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
           
           yes "" | make O=out oldconfig
           
-          echo "--- COMPILANDO ---"
+          echo "--- COMPILANDO COM CLANG 15 ---"
           # LLVM_IAS=0 usa o assembler do GCC (Essencial para não dar JUNK)
-          
-          yes "" | make -j$(nproc --all) O=out \
-          CC=clang \
-          LLVM=1 \
+          make -j$(nproc --all) O=out \
+          CC=clang-15 \
+          LD=ld.lld-15 \
+          AR=llvm-ar-15 \
+          NM=llvm-nm-15 \
+          OBJCOPY=llvm-objcopy-15 \
+          OBJDUMP=llvm-objdump-15 \
+          STRIP=llvm-strip-15 \
           LLVM_IAS=0 \
           KCFLAGS="-w -fno-builtin -fcommon"
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_GSI_Final_Blindado
+          name: Kernel_A23_GSI_Android16_Final
           path: out/arch/arm64/boot/Image
