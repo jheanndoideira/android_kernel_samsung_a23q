@@ -1,4 +1,4 @@
-name: Build Wonderful Kernel A23 - SAFE CODE FIX
+name: Build Wonderful Kernel A23 - SURGICAL FIX
 
 on:
   workflow_dispatch:
@@ -31,8 +31,9 @@ jobs:
           git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 --single-branch -b master aosp-clang/clang
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 --single-branch -b android-14.0.0_r0.47 aosp-clang/gcc64
           
-      - name: Build Kernel (Safe Toolchain Fix)
+      - name: Build Kernel (Surgical VDSO Fix)
         run: |
+          # Configura os caminhos dos compiladores
           CLANG_BIN="$GITHUB_WORKSPACE/aosp-clang/clang/bin"
           GCC_BIN="$GITHUB_WORKSPACE/aosp-clang/gcc64/bin"
           export PATH="$CLANG_BIN:$GCC_BIN:$PATH"
@@ -40,38 +41,37 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
           
+          # --- O PULO DO GATO (FIX DE CÓDIGO) ---
+          # Remove flags de depuração que o Clang moderno tenta injetar no VDSO da Samsung
+          # Isso impede o erro "junk at end of line" sem deletar o arquivo
+          sed -i 's/-fno-asynchronous-unwind-tables//g' arch/arm64/kernel/vdso/Makefile
+          sed -i 's/-fno-stack-protector//g' arch/arm64/kernel/vdso/Makefile
+          
           make mrproper
           mkdir -p out
           
-          # Gera a config oficial da Samsung
+          # Gera a configuração base
           make O=out rsuntk_defconfig
           
-          echo "--- CORRIGINDO CONFLITOS DE SEGURANÇA ---"
+          # Desativa travas que impedem o boot com Kernel customizado
           scripts/config --file out/.config --disable MODULE_SIG
           scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
           scripts/config --file out/.config --disable SYSTEM_REVOCATION_LIST
           
-          # Força a aceitação das novas opções sem travar
+          # Responde "Enter" para todos os avisos de Kconfig da Samsung
           yes "" | make O=out oldconfig
           
-          echo "--- COMPILANDO COM MODO COMPATIBILIDADE ---"
-          # LLVM_IAS=0 força o uso do assembler do GCC (Binutils)
-          # Isso resolve o 'junk at end of line' sem precisar deletar arquivos
-          yes "" | make -j2 O=out \
+          echo "--- INICIANDO COMPILAÇÃO ---"
+          # LLVM_IAS=0 diz: "Clang, faça o código C, mas deixe o GCC clássico cuidar do Assembler"
+          yes "" | make -j$(nproc --all) O=out \
           CC=clang \
-          LD=ld.lld \
-          AR=llvm-ar \
-          NM=llvm-nm \
-          OBJCOPY=llvm-objcopy \
-          OBJDUMP=llvm-objdump \
-          STRIP=llvm-strip \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-android- \
-          CROSS_COMPILE_ARM32=arm-linux-androideabi- \
           LLVM_IAS=0 \
           KCFLAGS="-w -fno-builtin -fcommon"
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_KSU_SafeFix
+          name: Kernel_A23_KSU_Surgical_Fix
           path: out/arch/arm64/boot/Image
