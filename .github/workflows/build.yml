@@ -1,4 +1,4 @@
-name: Build Kernel A23 - LASER FOCUS IMAGE
+name: Build Kernel A23 - LASER FOCUS FINAL
 
 on:
   workflow_dispatch:
@@ -16,54 +16,37 @@ jobs:
 
       - name: Add KernelSU
         run: |
+          # Injeção direta do KernelSU no código fonte
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
       - name: Install Compilers
         run: |
           sudo apt update
+          # Instalando o toolkit LLVM/Clang e GCC para ARM64
           sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           
-      - name: Build Kernel (Bypassing DTB Errors)
+      - name: Build Kernel (Image Only)
         run: |
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           
-          # 1. FIX VDSO (O que resolveu o erro anterior)
+          # FIX VDSO: Resolve o erro de Relocation que você encontrou antes
           VDSO_MAKEFILE="arch/arm64/kernel/vdso/Makefile"
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' $VDSO_MAKEFILE
           
-          # 2. CONFIGURAÇÃO
+          # PREPARAÇÃO
           make mrproper
           mkdir -p out
           make O=out rsuntk_defconfig
           
-          # 3. TRAVAS DE SEGURANÇA (Para seu botão Power quebrado)
+          # SEGURANÇA GSI E BOTÃO POWER
+          # Desativa pânico e assinaturas para garantir o boot no Android 16
           scripts/config --file out/.config --disable MODULE_SIG
           scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
           scripts/config --file out/.config --disable PANIC_ON_OOPS
           scripts/config --file out/.config --set-val PANIC_TIMEOUT 0
           
-          # Aceita as perguntas novas do Android 16 (LTO, RELR) automaticamente
+          # RESOLVE O ERRO "END OF FILE": Aceita novas configs do Android 16 automaticamente
           make O=out olddefconfig
-          
-          echo "--- COMPILANDO APENAS A IMAGE (IGNORANDO DTBS) ---"
-          # Aqui está o segredo: adicionamos 'Image' no final do comando
-          make -j$(nproc --all) O=out \
-          CC=clang-15 \
-          LD=ld.lld-15 \
-          AR=llvm-ar-15 \
-          NM=llvm-nm-15 \
-          OBJCOPY=llvm-objcopy-15 \
-          OBJDUMP=llvm-objdump-15 \
-          STRIP=llvm-strip-15 \
-          LLVM_IAS=0 \
-          KCFLAGS="-w -fno-builtin -fcommon" \
-          Image
-
-      - name: Upload Image
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kernel_A23_Only_Image
-          path: out/arch/arm64/boot/Image
