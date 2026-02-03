@@ -18,7 +18,7 @@ jobs:
         run: |
           mkdir -p arch/arm64/crypto/
           curl -LSs "https://raw.githubusercontent.com/itejo443/android_kernel_samsung_sm7225/ksm/arch/arm64/crypto/aes-modes.S" -o arch/arm64/crypto/aes-modes.S
-          echo "Arquivo AES corrigido!"
+          echo "Correção AES aplicada!"
 
       - name: Setup KernelSU
         run: |
@@ -29,14 +29,22 @@ jobs:
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           
-          echo "--- LISTA DE ARQUIVOS ENCONTRADOS (Para diagnóstico) ---"
-          find arch/arm64/configs/ -maxdepth 2
-          echo "-------------------------------------------------------"
-
-          # Tenta o nome que você achou e as variações mais prováveis
-          # O 'make' ignora a extensão se você passar o nome certo
-          make bengal_a23_defconfig || make a23q_defconfig || make bengal_defconfig || make a23_defconfig || make default_defconfig
+          # Limpeza profunda para evitar o Erro 2
+          make mrproper
           
+          # Tenta encontrar o arquivo 'bengal_a23.confi' ou similares
+          # O comando abaixo procura o arquivo e tenta usá-lo automaticamente
+          CONF=$(find arch/arm64/configs/ -name "*bengal_a23*" | head -n 1 | sed 's|arch/arm64/configs/||')
+          
+          if [ -z "$CONF" ]; then
+            echo "Aviso: bengal_a23 não encontrado por busca, tentando nomes padrão..."
+            make a23q_defconfig || make bengal_defconfig || make vendor/bengal_defconfig || make default_defconfig
+          else
+            echo "Sucesso! Usando o arquivo encontrado: $CONF"
+            make $CONF
+          fi
+          
+          # Compilação real
           make -j$(nproc)
 
       - name: Upload Kernel Image
