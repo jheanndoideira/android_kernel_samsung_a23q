@@ -1,4 +1,4 @@
-name: Build Wonderful Kernel A23 - ESTÁVEL FINAL
+name: Build Wonderful Kernel A23 - FINAL STABLE FIX
 
 on:
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
           git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 --single-branch -b master aosp-clang/clang
           git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 --single-branch -b android-14.0.0_r0.47 aosp-clang/gcc64
           
-      - name: Build Kernel (Fix Global Memcpy)
+      - name: Build Kernel (Fix SSL & Memcpy)
         run: |
           CLANG_BIN="$GITHUB_WORKSPACE/aosp-clang/clang/bin"
           GCC_BIN="$GITHUB_WORKSPACE/aosp-clang/gcc64/bin"
@@ -43,19 +43,27 @@ jobs:
           make mrproper
           mkdir -p out
           
-          # Carrega o mapa personalizado
+          # Carrega a configuração do seu kernel
           make O=out rsuntk_defconfig
           
-          # Responde 'Sim' para as novas funções do Android 16/KernelSU
-          yes "" | make O=out oldconfig
+          # Aceita as novas funções do Android 16 automaticamente
+          make O=out olddefconfig
           
-          echo "--- INICIANDO COMPILAÇÃO FINAL ---"
-          # KCFLAGS corrigem o erro de 'memcpy binding' e ignoram avisos
-          make -j2 O=out CC=clang LLVM=1 LLVM_IAS=1 \
-          KCFLAGS="-w -fno-builtin-memcpy -fno-builtin-memmove -fno-builtin-memset -fno-builtin-stpcpy" \
+          echo "--- DESATIVANDO TRAVAS DE ASSINATURA ---"
+          # Isso resolve o erro 'SSL error' e 'extract-cert'
+          scripts/config --file out/.config --disable MODULE_SIG
+          scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
+          scripts/config --file out/.config --disable SYSTEM_REVOCATION_LIST
+          
+          echo "--- INICIANDO COMPILAÇÃO ---"
+          # LLVM_IAS=0 resolve o erro de memcpy
+          # KCFLAGS -fno-builtin reforça a correção
+          make -j2 O=out CC=clang LLVM=1 LLVM_IAS=0 \
+          KCFLAGS="-w -fno-builtin" \
           CONFIG_DEBUG_INFO_BTF=n \
           CONFIG_SYSTEM_TRUSTED_KEYS="" \
-          CONFIG_SYSTEM_REVOCATION_KEYS=""
+          CONFIG_SYSTEM_REVOCATION_KEYS="" \
+          CONFIG_MODULE_SIG=n
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
