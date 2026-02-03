@@ -14,11 +14,12 @@ jobs:
           sudo apt update
           sudo apt install -y bc bison build-essential flex gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libncurses5-dev git curl
 
-      - name: Import AES Fix
+      - name: Fix AES Error (Importando o arquivo que você achou)
         run: |
+          # Criamos a pasta e baixamos o arquivo corrigido
           mkdir -p arch/arm64/crypto/
           curl -LSs "https://raw.githubusercontent.com/itejo443/android_kernel_samsung_sm7225/ksm/arch/arm64/crypto/aes-modes.S" -o arch/arm64/crypto/aes-modes.S
-          echo "Correção AES aplicada!"
+          echo "Arquivo AES substituído para evitar erro de compilação!"
 
       - name: Setup KernelSU
         run: |
@@ -29,22 +30,20 @@ jobs:
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           
-          # Limpeza profunda para evitar o Erro 2
-          make mrproper
-          
-          # Tenta encontrar o arquivo 'bengal_a23.confi' ou similares
-          # O comando abaixo procura o arquivo e tenta usá-lo automaticamente
-          CONF=$(find arch/arm64/configs/ -name "*bengal_a23*" | head -n 1 | sed 's|arch/arm64/configs/||')
+          # 1. Tenta encontrar o melhor arquivo de configuração automaticamente
+          # Ele vai buscar por 'a23', 'bengal' ou qualquer 'defconfig' se falhar
+          CONF=$(find arch/arm64/configs/ -name "*a23q*" -o -name "*bengal*" | head -n 1 | sed 's|arch/arm64/configs/||')
           
           if [ -z "$CONF" ]; then
-            echo "Aviso: bengal_a23 não encontrado por busca, tentando nomes padrão..."
-            make a23q_defconfig || make bengal_defconfig || make vendor/bengal_defconfig || make default_defconfig
-          else
-            echo "Sucesso! Usando o arquivo encontrado: $CONF"
-            make $CONF
+            echo "Aviso: Não achou nome específico, tentando o primeiro defconfig disponível..."
+            CONF=$(ls arch/arm64/configs/ | grep _defconfig | head -n 1)
           fi
+
+          echo "------------------------------------------"
+          echo "MAPA SELECIONADO: $CONF"
+          echo "------------------------------------------"
           
-          # Compilação real
+          make $CONF
           make -j$(nproc)
 
       - name: Upload Kernel Image
