@@ -1,4 +1,4 @@
-name: Build Kernel A23 - FINAL vDSO FIX
+name: Build Kernel A23 - ULTIMATE VDSO FIX
 
 on:
   workflow_dispatch:
@@ -21,42 +21,48 @@ jobs:
       - name: Install Compilers
         run: |
           sudo apt update
+          # Usando o Clang 15 e GCC para garantir compatibilidade GSI Android 16
           sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           
-      - name: Build Kernel (Surgical Relocation Fix)
+      - name: Build Kernel (Applying Research Solutions)
         run: |
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           
-          # --- A MARRETA NO VDSO ---
-          # 1. Forçamos o Makefile do vDSO a desativar o Stack Protector em todas as frentes
-          sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fno-stack-protector -fPIC/g' arch/arm64/kernel/vdso/Makefile
+          # --- APLICAÇÃO DA SOLUÇÃO 1 (Sua Pesquisa) ---
+          # Força -fPIC e desabilita stack-protector no Makefile do vDSO
+          VDSO_MAKEFILE="arch/arm64/kernel/vdso/Makefile"
+          sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' $VDSO_MAKEFILE
           
-          # 2. Limpamos as flags que causam o "Junk" e as Relocations
-          sed -i 's/-fstack-protector//g' arch/arm64/kernel/vdso/Makefile
-          sed -i 's/-fstack-protector-strong//g' arch/arm64/kernel/vdso/Makefile
-          sed -i 's/-fno-asynchronous-unwind-tables//g' arch/arm64/kernel/vdso/Makefile
+          # Garante que as flags específicas de vgettimeofday não usem proteção de pilha
+          echo "CFLAGS_vgettimeofday.o += -fno-stack-protector -fPIC" >> $VDSO_MAKEFILE
+          echo "CFLAGS_gettimeofday.o += -fno-stack-protector -fPIC" >> $VDSO_MAKEFILE
           
-          # 3. Injetamos um comando para garantir que o compilador ignore a proteção de pilha aqui
-          echo "CFLAGS_vgettimeofday.o = -fno-stack-protector -fPIC" >> arch/arm64/kernel/vdso/Makefile
-          echo "CFLAGS_gettimeofday.o = -fno-stack-protector -fPIC" >> arch/arm64/kernel/vdso/Makefile
+          # Remove o "Junk" (Sua descoberta anterior do Nathan)
+          sed -i 's/-fno-asynchronous-unwind-tables//g' $VDSO_MAKEFILE
 
+          # --- PREPARAÇÃO ---
           make mrproper
           mkdir -p out
           make O=out rsuntk_defconfig
           
-          # Ajustes GSI Android 16 e Segurança
-          scripts/config --file out/.config --disable MODULE_SIG
-          scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
+          # --- APLICAÇÃO DA SOLUÇÃO 2 (Sua Pesquisa) ---
+          # Desativa Stack Protector via defconfig para evitar conflitos
           scripts/config --file out/.config --disable STACKPROTECTOR
           scripts/config --file out/.config --disable STACKPROTECTOR_STRONG
+          
+          # Ajustes para GSI Android 16 e Botão Power Quebrado
+          scripts/config --file out/.config --disable MODULE_SIG
+          scripts/config --file out/.config --disable SYSTEM_TRUSTED_KEYRING
+          scripts/config --file out/.config --disable PANIC_ON_OOPS
+          scripts/config --file out/.config --set-val PANIC_TIMEOUT 0
           
           yes "" | make O=out oldconfig
           
           echo "--- COMPILANDO ---"
-          # LLVM_IAS=0 mantém o assembler estável que você validou
+          # LLVM_IAS=0 usa o assembler do GCC, evitando o erro de lixo (junk)
           make -j$(nproc --all) O=out \
           CC=clang-15 \
           LD=ld.lld-15 \
@@ -71,5 +77,5 @@ jobs:
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_vDSO_Success
+          name: Kernel_A23_Ultimate_vDSO_Fixed
           path: out/arch/arm64/boot/Image
