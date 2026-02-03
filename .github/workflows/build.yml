@@ -9,9 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Cleanup Server
-        uses: rokibhasansagar/slimhub_actions@main
-        
       - name: Installing Dependencies
         run: |
           sudo apt update -y
@@ -19,36 +16,38 @@ jobs:
           
       - name: Setup Kernel Source
         uses: actions/checkout@v4
-        with:
-          path: kernel-source
 
       - name: Add KernelSU
         run: |
-          cd kernel-source
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-      - name: Download Google Build Tools
+      - name: Download Google Build Tools (VERSÃO LEVE)
         run: |
-          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 -b master aosp-clang/clang
-          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android-14.0.0_r0.47 --depth=1 aosp-clang/gcc64
+          # O segredo é o --depth=1 e --single-branch. Isso baixa só o que importa agora.
+          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 --depth=1 --single-branch -b master aosp-clang/clang
+          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 --depth=1 --single-branch -b android-14.0.0_r0.47 aosp-clang/gcc64
           
       - name: Build Kernel
         run: |
-          CLANG="$GITHUB_WORKSPACE/aosp-clang/clang/bin"
-          GCC64="$GITHUB_WORKSPACE/aosp-clang/gcc64/bin"
-          export PATH=$CLANG:$GCC64:$PATH
+          CLANG_BIN="$GITHUB_WORKSPACE/aosp-clang/clang/bin"
+          GCC_BIN="$GITHUB_WORKSPACE/aosp-clang/gcc64/bin"
+          export PATH="$CLANG_BIN:$GCC_BIN:$PATH"
           export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export CROSS_COMPILE=aarch64-linux-android-
           
-          cd kernel-source
-          # Tenta o mapa do A23Q
+          # Limpeza total antes de começar
+          make mrproper
+          mkdir -p out
+          
+          # Escolha do mapa (Priorizando o seu A23)
           make O=out vendor/a23q_eur_open_defconfig || make O=out a23q_defconfig || make O=out bengal_defconfig
           
+          # Início da compilação real
           make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel_A23_KSU
-          path: kernel-source/out/arch/arm64/boot/Image
+          name: Kernel_A23_KSU_Final
+          path: out/arch/arm64/boot/Image
