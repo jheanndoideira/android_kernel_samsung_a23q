@@ -1,4 +1,4 @@
-name: A23_Final_Pathfinder
+name: A23_Ultimate_Fix
 on:
   workflow_dispatch:
 
@@ -43,37 +43,34 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      # === A CORREÇÃO DE NAVEGAÇÃO ESTÁ AQUI ===
-      - name: Emergency Fixes (Pathfinder)
+      # === AQUI ESTÁ O TRUQUE DE MESTRE ===
+      - name: Universal Path Fixes
         run: |
-          # Vamos para a raiz do driver de áudio (o "hall de entrada")
-          cd kernel_source/techpack/audio/asoc/codecs/tas256x
+          echo "=== Entrando no Labirinto do Áudio ==="
+          cd kernel_source/techpack/audio/asoc/codecs/tas256x/os_layer/src
           
-          echo "=== Fix 1: SRC (Onde o arquivo .c mora) ==="
-          # Entramos na pasta do código fonte
-          cd os_layer/src
-          # Trazemos as pastas vizinhas para cá via atalho
+          # Fix 1 (Antigo): Traz as pastas physical e logical para cá
           ln -sf ../../physical_layer physical_layer
           ln -sf ../../logical_layer logical_layer
-          # Voltamos para o hall
-          cd ../..
           
-          echo "=== Fix 2: INC (Onde o arquivo .h mora) ==="
-          # Entramos na pasta lógica
-          cd logical_layer/inc
-          # O arquivo aqui dentro precisa da physical_layer, trazemos ela para cá
+          # Fix 2 (O NOVO - Linha 48): Cria um espelho da pasta mãe aqui dentro
+          # Isso faz com que "include os_layer/..." funcione magicamente
+          ln -sf .. os_layer
+          
+          echo "=== Entrando na Toca do Coelho (Logical Layer) ==="
+          cd ../../logical_layer/inc
+          # Fix 3 (Antigo): Traz a physical_layer para cá também
           ln -sf ../../physical_layer physical_layer
           
-          echo "=== Fix 3: Câmera ==="
-          # Voltamos para a raiz ABSOLUTA do projeto para não errar o caminho
+          echo "=== Consertando a Câmera ==="
+          # Volta para a raiz total
           cd $GITHUB_WORKSPACE/kernel_source
-          
           cd techpack/camera/drivers/cam_utils
           ln -sf ../cam_req_mgr/cam_req_mgr_core.h cam_req_mgr_core.h
           
-          echo "Todos os caminhos foram conectados corretamente!"
+          echo "Todos os caminhos (físico, lógico e sistema) foram consertados!"
 
-      - name: Build Kernel (FINAL)
+      - name: Build Kernel (SILENT & POWERFUL)
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
@@ -84,7 +81,7 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # === PERFORMANCE (SILENT GAMER) ===
+          # === PERFORMANCE SETTINGS ===
           ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
@@ -103,7 +100,7 @@ jobs:
             
           make olddefconfig
           
-          echo "=== COMPILANDO === "
+          echo "=== INICIANDO COMPILAÇÃO === "
           export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
           make -j$(nproc --all) \
               CC=clang \
@@ -120,7 +117,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-Victory-Kernel
+          name: A23-Final-Kernel
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
