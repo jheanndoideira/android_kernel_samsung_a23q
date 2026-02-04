@@ -1,13 +1,13 @@
-name: Build Kernel A23 4G Turbo
+name: Build Kernel A235M (Fixed)
 on:
   workflow_dispatch:
     inputs:
       DEFCONFIG:
         description: Defconfig
-        default: 'vendor/rsuntk_defconfig'
+        default: 'a23q_defconfig' # Nome mais comum no repo do potatogeek
         required: true
       KSU:
-        description: Enable KernelSU support
+        description: Enable KernelSU
         type: boolean
         default: true
 
@@ -27,45 +27,63 @@ jobs:
         sudo apt update -y
         sudo apt install bc cpio flex bison git gcc g++ python-is-python3 tar perl curl libc++-dev lz4 libssl-dev -y
         
-    - name: Fetch Toolchain (Clang 18)
+    - name: Fetch Toolchain (Clang 18 Stable)
       run: |
         mkdir toolchains
         cd toolchains
         mkdir clang-18 && cd clang-18
-        # Clang 18 é essencial para performance no Android 14/16
-        wget -q -O clang18.tar.gz https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522817.tar.gz
-        tar -xf clang18.tar.gz && rm clang18.tar.gz
+        # Usando um link direto do Github para o Clang r450784d (Estável para Android 14)
+        # Isso evita o erro 404 do googlesource
+        wget -q https://github.com/ZyCromerZ/Clang/releases/download/18.0.0-20240404-release/Clang-18.0.0-20240404.tar.gz
+        tar -xf Clang-18.0.0-20240404.tar.gz
+        rm Clang-18.0.0-20240404.tar.gz
         cd ..
         git clone --depth=1 https://gitlab.com/Rissu-Projekt/toolchains/aarch64-linux-android.git google
       working-directory: android_kernel_samsung_a23
 
-    - name: Build kernel (Turbo Mode)
+    - name: Build kernel (Final Turbo)
       id: buildKernel
       run: |
-        # Configurando o PATH corretamente para o Clang 18
         export PATH=$(pwd)/toolchains/clang-18/bin:$(pwd)/toolchains/google/bin:$PATH
+        export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-android-
         export CLANG_TRIPLE=aarch64-linux-gnu-
-        export ARCH=arm64
         
-        # --- INJEÇÃO DE PERFORMANCE ---
+        # --- OTIMIZAÇÕES ---
         export CC=clang
         export LLVM=1
         export LLVM_IAS=1
-        # Otimização -O3 e otimização para o processador Cortex-A73/A53 do SD680
         export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
-        # ------------------------------
+        # -------------------
 
-        # Aplicar KernelSU se solicitado
+        # Instalação Segura do KernelSU (Link Oficial que não quebra)
         if [[ "${{ github.event.inputs.KSU }}" == "true" ]]; then
-            curl -LSs "https://raw.githubusercontent.com/rifsytn/KernelSU-Next/main/kernel/setup.sh" | bash -s main
+            echo "Instalando KernelSU..."
+            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
         fi
 
-        # Comando de build corrigido (sem os 'echo' perdidos)
-        bash build_kernel.sh ${{ github.event.inputs.DEFCONFIG }} ${{ github.event.inputs.KSU }} $(nproc --all)
+        # Tenta achar o defconfig correto automaticamente
+        if [ -f arch/arm64/configs/a23q_eur_open_defconfig ]; then
+            export CONFIG_NAME="a23q_eur_open_defconfig"
+        else
+            export CONFIG_NAME="a23q_defconfig"
+        fi
+        
+        echo "Usando Config: $CONFIG_NAME"
+        make -C . O=out $CONFIG_NAME
 
-        # Exportar variáveis para o upload
-        echo "buildDetails=A23q-Turbo-$(date +'%Y%m%d%H%M')" >> $GITHUB_OUTPUT
+        # Adiciona KSU na config se não tiver
+        if [[ "${{ github.event.inputs.KSU }}" == "true" ]]; then
+            echo "CONFIG_KSU=y" >> out/.config
+        fi
+
+        # Compilação
+        make -j$(nproc --all) -C . O=out \
+            CC=clang LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CLANG_TRIPLE=aarch64-linux-gnu-
+
+        echo "buildDetails=A235M-Turbo-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
       working-directory: android_kernel_samsung_a23
       
     - name: Upload Kernel Image
