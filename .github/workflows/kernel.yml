@@ -1,4 +1,4 @@
-name: A23_Napalm_Strike_A16
+name: A23_GPS_Guided_Strike
 on:
   workflow_dispatch:
 
@@ -43,43 +43,38 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      # === AQUI ESTÃO AS CORREÇÕES ATUALIZADAS ===
-      - name: Apply Napalm Fixes (Audio/Camera/Display)
+      # === CORREÇÕES COM NAVEGAÇÃO ABSOLUTA (GPS) ===
+      - name: Apply GPS Fixes (Audio/Camera/Display)
         run: |
-          echo "=== 1. Correção do ÁUDIO (Raiz + Logical) ==="
-          # Vai para a raiz do codec
-          cd kernel_source/techpack/audio/asoc/codecs/tas256x/os_layer/src
+          # Define a raiz para facilitar
+          ROOT=$GITHUB_WORKSPACE/kernel_source
           
-          # Fix Raiz (para o arquivo .c)
+          echo "=== 1. ÁUDIO: Raiz do Codec ==="
+          cd $ROOT/techpack/audio/asoc/codecs/tas256x/os_layer/src
           ln -sf ../../physical_layer physical_layer
           ln -sf ../../logical_layer logical_layer
-          
-          # Fix do Código (sed)
+          # Sed fixes
           sed -i 's|"os_layer/inc/tas256x-regmap.h"|"../inc/tas256x-regmap.h"|g' tas256x-codec.c
           sed -i 's|"algo/inc/tas_smart_amp_v2.h"|"../../algo/inc/tas_smart_amp_v2.h"|g' tas256x-codec.c
           
-          # === O NOVO FIX DO ÁUDIO (Linha 4745) ===
-          # O erro estava dentro de logical_layer/inc pedindo physical_layer
-          cd logical_layer/inc
+          echo "=== 2. ÁUDIO: Logical Layer (Onde deu o erro de compilação) ==="
+          cd $ROOT/techpack/audio/asoc/codecs/tas256x/os_layer/src/logical_layer/inc
           ln -sf ../../physical_layer physical_layer
           
-          # Volta para o Algo (Fix antigo da linha 30)
-          cd ../../../../../algo/inc
+          echo "=== 3. ÁUDIO: Algo Header (Onde eu errei o CD antes) ==="
+          # Agora usando caminho absoluto, impossível errar
+          cd $ROOT/techpack/audio/asoc/codecs/tas256x/algo/inc
           sed -i 's|"physical_layer/inc/tas256x.h"|"../../physical_layer/inc/tas256x.h"|g' tas_smart_amp_v2.h
           
-          echo "=== 2. Correção da CÂMERA (Lista Completa) ==="
-          cd $GITHUB_WORKSPACE/kernel_source/techpack/camera/drivers/cam_utils
-          
-          # Trazemos TODA a família de arquivos que ele pediu até agora
+          echo "=== 4. CÂMERA: Todos os headers ==="
+          cd $ROOT/techpack/camera/drivers/cam_utils
           ln -sf ../cam_req_mgr/cam_req_mgr_core.h cam_req_mgr_core.h
           ln -sf ../cam_req_mgr/cam_req_mgr_interface.h cam_req_mgr_interface.h
           ln -sf ../cam_req_mgr/cam_req_mgr_core_defs.h cam_req_mgr_core_defs.h
-          
-          # === O NOVO FIX DA CÂMERA (O erro do util.h) ===
           ln -sf ../cam_req_mgr/cam_req_mgr_util.h cam_req_mgr_util.h
           
-          echo "=== 3. Correção do DISPLAY ==="
-          cd $GITHUB_WORKSPACE/kernel_source/techpack/display/pll
+          echo "=== 5. DISPLAY: Trace path ==="
+          cd $ROOT/techpack/display/pll
           sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
 
       - name: Build Kernel (ANDROID 16 + BRUTE FORCE)
@@ -93,7 +88,7 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # === CONFIG PARA ANDROID 16 ===
+          # === CONFIG DO ANDROID 16 ===
           ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
@@ -115,8 +110,7 @@ jobs:
             
           make olddefconfig
           
-          echo "=== COMPILANDO (IGNORANDO ERROS NÃO-FATAIS) ==="
-          # Flags agressivas para garantir que ele não pare por bobagem
+          echo "=== COMPILANDO (FORÇA BRUTA) ==="
           export KCFLAGS="-O3 -w -Wno-error -fno-builtin -fcommon -pipe -march=armv8-a+crc+crypto"
           
           make -j$(nproc --all) \
@@ -134,7 +128,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-Napalm-A16
+          name: A23-GPS-Kernel-A16
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
