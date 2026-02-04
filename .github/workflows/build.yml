@@ -1,4 +1,4 @@
-name: Build A235M Ultra - Next + SUSFS
+name: Build A235M Ultra - Next + SUSFS (No-404 Edition)
 on:
   workflow_dispatch:
     inputs:
@@ -24,23 +24,28 @@ jobs:
         sudo apt update -y
         sudo apt install bc cpio flex bison git gcc g++ python-is-python3 tar perl curl libc++-dev lz4 libssl-dev -y
 
-    - name: Baixar Toolchains (Links Oficiais)
+    - name: Baixar Toolchains (Google Official)
       run: |
         mkdir toolchains
         cd toolchains
-        # Clang Oficial do Google (Android 14/15/16)
         mkdir clang && cd clang
         wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522817.tar.gz
         tar -xf clang-r522817.tar.gz && rm clang-r522817.tar.gz
         cd ..
-        # GCC Aarch64 para compatibilidade
         git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
       working-directory: kernel_source
 
-    - name: Injetar KernelSU Next
+    - name: Injetar KernelSU Next (Método Manual)
       run: |
-        echo "=== Instalando KernelSU Next ==="
-        curl -LSs "https://raw.githubusercontent.com/rifsytn/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+        echo "=== Clonando KernelSU Next ==="
+        git clone --depth 1 https://github.com/rifsytn/KernelSU-Next drivers/kernelsu
+        
+        echo "=== Injetando no Sistema de Arquivos ==="
+        # Adiciona ao Makefile e Kconfig para o compilador enxergar o KSU
+        echo "obj-y += kernelsu/" >> drivers/Makefile
+        sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+        
+        echo "KernelSU Next injetado com sucesso!"
       working-directory: kernel_source
 
     - name: Injetar SUSFS
@@ -49,51 +54,45 @@ jobs:
         cd ..
         git clone https://gitlab.com/simonpunk/susfs4ksu.git
         
-        # Copiando arquivos do driver SUSFS
         cp susfs4ksu/kernel_patches/fs/susfs.c kernel_source/fs/
         cp susfs4ksu/kernel_patches/include/linux/susfs.h kernel_source/include/linux/
         
-        # Aplicando patches de integração
         cd kernel_source
-        # O patch 4.19 é o mais compatível com o A23
-        patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "Patch com avisos, mas prosseguindo..."
+        # Patch automático em modo batch para não travar
+        patch -p1 --batch --silent < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "Patch com avisos, mas prosseguindo..."
       working-directory: kernel_source
 
     - name: Compilar Kernel (Turbo Mode)
       id: buildKernel
       run: |
-        # Configuração de Caminhos
         export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-android-
         export CLANG_TRIPLE=aarch64-linux-gnu-
         
-        # Flags de Performance Máxima
+        # Flags de Performance
         export CC=clang
         export LLVM=1
         export LLVM_IAS=1
         export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto -mllvm -polly"
         
-        # Preparar Configuração
+        cd kernel_source
         make -C . O=out ${{ github.event.inputs.DEFCONFIG }}
 
-        # Ativar KSU e SUSFS no arquivo de configuração
+        # Ativar Flags de Root e Invisibilidade
         echo "CONFIG_KSU=y" >> out/.config
         echo "CONFIG_KSU_SUSFS=y" >> out/.config
         echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> out/.config
         echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> out/.config
-        echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> out/.config
-        echo "CONFIG_KSU_SUSFS_SUS_OVERLAY=y" >> out/.config
 
-        # Compilação Real
+        # Compilação
         make -j$(nproc --all) -C . O=out \
             CC=clang LLVM=1 LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-android- \
             CLANG_TRIPLE=aarch64-linux-gnu-
 
-        # Nomear o arquivo final
-        echo "details=A235M-NEXT-SUSFS-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
-      working-directory: kernel_source
+        echo "details=A235M-ULTRA-NEXT-SUSFS-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+      working-directory: .
 
     - name: Enviar Kernel (Image)
       uses: actions/upload-artifact@v4
