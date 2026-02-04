@@ -1,4 +1,4 @@
-name: A23_Total_Victory_A16
+name: A23_Extreme_A16_LTO
 on:
   workflow_dispatch:
 
@@ -43,79 +43,55 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      - name: Apply All Fixes (Paths + EOF + Makefiles)
+      - name: Manual Path Reconstruction (Audio & Camera)
         run: |
           ROOT=$GITHUB_WORKSPACE/kernel_source
-          
-          echo "=== 1. Corrigindo 'End of File' (EOF) no Áudio ==="
-          # Adiciona uma linha em branco no final de cada arquivo .c e .h para evitar erros de leitura
-          find $ROOT/techpack/audio/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '$a\' {} \;
-
-          echo "=== 2. ÁUDIO: Master Key (Makefile Injection) ==="
-          AUDIO_DIR="techpack/audio/asoc/codecs/tas256x"
-          cd $ROOT/$AUDIO_DIR
-          
-          # Injeta caminhos de busca para o compilador não se perder
-          echo "ccflags-y += -I\$(src)/os_layer/inc" >> Makefile
-          echo "ccflags-y += -I\$(src)/physical_layer/inc" >> Makefile
-          echo "ccflags-y += -I\$(src)/logical_layer/inc" >> Makefile
-          echo "ccflags-y += -I\$(src)/algo/inc" >> Makefile
-          
-          # Injeção na subpasta OS Layer (Teimosa)
-          echo "ccflags-y += -I\$(src)/../../physical_layer/inc" >> os_layer/src/Makefile
-          echo "ccflags-y += -I\$(src)/../../logical_layer/inc" >> os_layer/src/Makefile
-          echo "ccflags-y += -I\$(src)/../../algo/inc" >> os_layer/src/Makefile
-
-          echo "=== 3. CÂMERA: GPS Paths & CCI Fix ==="
-          cd $ROOT/techpack/camera/drivers/cam_sensor_module/cam_cci
-          echo "ccflags-y += -I\$(src)" >> Makefile
+          cd $ROOT/techpack/audio/asoc/codecs/tas256x/os_layer/src
+          mkdir -p physical_layer/inc logical_layer/inc algo/inc os_layer/inc
+          cp ../../physical_layer/inc/* physical_layer/inc/ 2>/dev/null || true
+          cp ../../logical_layer/inc/* logical_layer/inc/ 2>/dev/null || true
+          cp ../../algo/inc/* algo/inc/ 2>/dev/null || true
+          cp ../inc/* os_layer/inc/ 2>/dev/null || true
           
           cd $ROOT/techpack/camera/drivers/cam_utils
-          ln -sf ../cam_req_mgr/cam_req_mgr_core.h cam_req_mgr_core.h
-          ln -sf ../cam_req_mgr/cam_req_mgr_interface.h cam_req_mgr_interface.h
-          ln -sf ../cam_req_mgr/cam_req_mgr_core_defs.h cam_req_mgr_core_defs.h
-          ln -sf ../cam_req_mgr/cam_req_mgr_util.h cam_req_mgr_util.h
-          ln -sf ../cam_req_mgr/cam_req_mgr_timer.h cam_req_mgr_timer.h
-
-          echo "=== 4. DISPLAY: Path Correction ==="
+          cp ../cam_req_mgr/*.h . 2>/dev/null || true
+          
           cd $ROOT/techpack/display/pll
           sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
 
-      - name: Build Kernel (ANDROID 16 OPTIMIZED)
+      - name: Build Kernel (LTO EXTREME)
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           cd kernel_source
-          make clean && make mrproper
           
+          make clean && make mrproper
           make vendor/a23_eur_open_defconfig
           
-          # === CONFIGURAÇÃO ANDROID 16 & GAMING ===
+          # === TUNING DE PERFORMANCE EXTREMA ===
           ./scripts/config --file .config \
+            --enable CONFIG_LTO_CLANG_FULL \
+            --disable CONFIG_THINLTO \
+            --disable CONFIG_SHADOW_CALL_STACK \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
-            --enable CONFIG_KSU_SUSFS_SUS_PATH \
-            --enable CONFIG_KSU_SUSFS_SUS_MOUNT \
             --enable CONFIG_OVERLAY_FS \
             --enable CONFIG_BPF_SYSCALL \
             --enable CONFIG_IP_NF_TARGET_TTL \
             --enable CONFIG_JUMP_LABEL \
             --enable CONFIG_HZ_300 \
             --enable CONFIG_PREEMPT \
-            --disable CONFIG_HZ_100 \
             --disable CONFIG_DEBUG_KERNEL \
-            --disable CONFIG_SAMSUNG_DEBUG \
-            --disable CONFIG_FTRACE \
-            --disable CONFIG_PROFILING
+            --disable CONFIG_SAMSUNG_DEBUG
             
-          make olddefconfig
+          # O "yes" configurado para aceitar LTO e negar Shadow Call Stack
+          # Resposta 2 para LTO_CLANG e 'n' para Shadow Call Stack
+          printf "2\nn\ny\n" | make olddefconfig
           
-          echo "=== COMPILAÇÃO FINAL (BRUTE FORCE) ==="
-          # KCFLAGS com foco em performance e silenciar avisos inúteis
-          export KCFLAGS="-O3 -w -Wno-everything -fno-builtin -fcommon -pipe -march=armv8-a+crc+crypto"
-          
+          echo "=== COMPILANDO COM LTO (ISSO VAI DEMORAR) ==="
+          export KCFLAGS="-O3 -w -fno-builtin -fcommon -pipe -march=armv8-a+crc+crypto"
           make -j$(nproc --all) \
               CC=clang \
               CROSS_COMPILE=aarch64-linux-android- \
@@ -131,8 +107,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-Victory-A16-Kernel
+          name: A23-Extreme-LTO-Kernel
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
-
