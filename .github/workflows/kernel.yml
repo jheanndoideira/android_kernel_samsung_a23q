@@ -1,4 +1,4 @@
-name: A23_Nuclear_Fix
+name: A23_God_Mode
 on:
   workflow_dispatch:
 
@@ -43,36 +43,42 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      # === AQUI ESTÁ A LISTA COMPLETA DE CIRURGIAS ===
-      - name: Nuclear Fixes (Audio & Camera)
+      # === LISTA MESTRA DE CORREÇÕES ===
+      - name: God Mode Fixes (Audio, Camera, Display)
         run: |
-          echo "=== 1. Entrando na pasta problemática ==="
+          echo "=== 1. Correções de ÁUDIO (Anteriores + Nova) ==="
           cd kernel_source/techpack/audio/asoc/codecs/tas256x/os_layer/src
           
-          # Mantém os atalhos básicos
+          # Fix: Atalhos básicos
           ln -sf ../../physical_layer physical_layer
           ln -sf ../../logical_layer logical_layer
           
-          echo "=== 2. Reescrevendo o código do Áudio (Linha por Linha) ==="
-          
-          # Fix Linha 48 (Regmap) - Trocando caminho errado pelo certo
+          # Fix: Reescreve o .c principal (Regmap e Algo)
           sed -i 's|"os_layer/inc/tas256x-regmap.h"|"../inc/tas256x-regmap.h"|g' tas256x-codec.c
-          
-          # Fix Linha 50 (O NOVO - Algo) - Apontando para 2 pastas acima
           sed -i 's|"algo/inc/tas_smart_amp_v2.h"|"../../algo/inc/tas_smart_amp_v2.h"|g' tas256x-codec.c
           
-          echo "=== 3. Fix Preventivo na Camada Lógica ==="
-          cd ../../logical_layer/inc
-          ln -sf ../../physical_layer physical_layer
+          # Fix NOVO (Dentro do Header Algo): O erro da linha 30
+          cd ../../algo/inc
+          # Troca "physical_layer/..." por "../../physical_layer/..."
+          sed -i 's|"physical_layer/inc/tas256x.h"|"../../physical_layer/inc/tas256x.h"|g' tas_smart_amp_v2.h
           
-          echo "=== 4. Fix Preventivo na Câmera ==="
+          echo "=== 2. Correções de CÂMERA ==="
           cd $GITHUB_WORKSPACE/kernel_source/techpack/camera/drivers/cam_utils
+          # Fixes Anteriores
           ln -sf ../cam_req_mgr/cam_req_mgr_core.h cam_req_mgr_core.h
           ln -sf ../cam_req_mgr/cam_req_mgr_interface.h cam_req_mgr_interface.h
+          # Fix NOVO (Core Defs)
+          ln -sf ../cam_req_mgr/cam_req_mgr_core_defs.h cam_req_mgr_core_defs.h
           
-          echo "Todas as correções aplicadas!"
+          echo "=== 3. Correção de DISPLAY (Erro do Trace) ==="
+          cd $GITHUB_WORKSPACE/kernel_source/techpack/display/pll
+          # O arquivo pll_trace.h está procurando a si mesmo no lugar errado
+          # Vamos mudar o caminho do INCLUDE_PATH para o caminho relativo correto
+          sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
+          
+          echo "TODAS AS CORREÇÕES APLICADAS!"
 
-      - name: Build Kernel (SILENT MODE)
+      - name: Build Kernel (SILENT & POWERFUL)
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
@@ -83,7 +89,7 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # === CONFIGURAÇÕES ===
+          # === PERFORMANCE SETTINGS ===
           ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
@@ -102,7 +108,7 @@ jobs:
             
           make olddefconfig
           
-          echo "=== COMPILANDO === "
+          echo "=== INICIANDO COMPILAÇÃO === "
           export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
           make -j$(nproc --all) \
               CC=clang \
@@ -119,7 +125,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-Nuclear-Kernel
+          name: A23-GodMode-Kernel
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
