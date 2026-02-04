@@ -1,15 +1,15 @@
-name: Build A235M Ultimate (FPS Fix + VBMeta)
+name: Build A235M Ultimate (Debug + Fixes)
 on:
   workflow_dispatch:
     inputs:
       DEFCONFIG:
-        description: 'Nome do Defconfig'
+        description: 'Nome do Defconfig (Ex: a23q_defconfig)'
         default: 'a23q_defconfig'
         required: true
 
 jobs:
   build:
-    runs-on: ubuntu-22.04 # Fixamos no 22.04 para melhor compatibilidade com Python 2
+    runs-on: ubuntu-22.04
     
     steps:
     - name: Checkout Kernel Source
@@ -20,29 +20,31 @@ jobs:
         path: kernel_source
         fetch-depth: 1
 
-    - name: Instalar Dependências e Python 2
+    - name: Instalar Dependências e Fix Python 2
       run: |
         sudo apt update -y
-        # Instala Python 2 e ferramentas
+        # Instala Python 2 e ferramentas essenciais
         sudo apt install bc cpio flex bison git gcc g++ tar perl curl libc++-dev lz4 libssl-dev python2 -y
         
-        # Link simbólico para forçar "python" a ser python2 durante a build
+        # O TRUQUE: Força o sistema a usar Python 2 (resolve o erro SyntaxError)
         sudo ln -sf /usr/bin/python2 /usr/bin/python
         
-        echo "Versão do Python configurada:"
+        echo "Versão do Python ativa:"
         python --version
       working-directory: .
 
-    - name: Baixar Toolchains
+    - name: Baixar Toolchains (Clang + GCC)
       run: |
         mkdir toolchains
         cd toolchains
-        # Clang Google
+        
+        # Clang Google (Oficial)
         mkdir clang && cd clang
         wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522817.tar.gz
         tar -xf clang-r522817.tar.gz && rm clang-r522817.tar.gz
         cd ..
-        # GCC 4.9 (Essencial para esse kernel)
+        
+        # GCC 4.9 (Essencial para Samsung 4.19)
         git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
       working-directory: .
 
@@ -62,7 +64,7 @@ jobs:
         cp susfs4ksu/kernel_patches/include/linux/susfs.h kernel_source/include/linux/
         
         cd kernel_source
-        # Tenta aplicar o patch, se falhar, continua (|| true)
+        # Tenta aplicar patch (se falhar, ignora e fazemos manual no makefile)
         patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
         
         # Garante a inclusão no Makefile
@@ -71,7 +73,7 @@ jobs:
         fi
       working-directory: .
 
-    - name: Configurar e Otimizar (Debloat)
+    - name: Configurar e Otimizar (Passo Crítico)
       run: |
         export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
         export ARCH=arm64
@@ -81,67 +83,4 @@ jobs:
         
         cd kernel_source
         
-        # Gera a configuração padrão
-        make ${{ github.event.inputs.DEFCONFIG }}
-        
-        echo "=== APLICANDO OTIMIZAÇÕES ==="
-        # Ativa KSU e SUSFS
-        ./scripts/config --file .config \
-            --enable CONFIG_KSU \
-            --enable CONFIG_KSU_SUSFS \
-            --enable CONFIG_KSU_SUSFS_SUS_PATH \
-            --enable CONFIG_KSU_SUSFS_SUS_MOUNT
-
-        # Desativa Debug (Debloat)
-        ./scripts/config --file .config \
-            --disable CONFIG_DEBUG_KERNEL \
-            --disable CONFIG_DEBUG_INFO \
-            --disable CONFIG_FRAME_POINTER \
-            --disable CONFIG_KALLSYMS \
-            --disable CONFIG_SCHED_DEBUG \
-            --disable CONFIG_FTRACE
-      working-directory: .
-
-    - name: Compilar Kernel (Fix Python Error)
-      id: buildKernel
-      run: |
-        export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
-        export ARCH=arm64
-        export CROSS_COMPILE=aarch64-linux-android-
-        export CLANG_TRIPLE=aarch64-linux-gnu-
-        
-        cd kernel_source
-        
-        # Flags O3 + Polly
-        export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto -mllvm -polly"
-        
-        echo "Compilando..."
-        make -j$(nproc --all) \
-            CC=clang \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            LLVM=1 \
-            LLVM_IAS=1
-
-        echo "details=A235M-PERF-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
-      working-directory: .
-
-    - name: Criar VBMeta Disabled (Automático)
-      run: |
-        # Baixa a ferramenta oficial
-        wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
-        
-        # Usa Python 3 aqui (o avbtool novo exige py3)
-        # Como mudamos o "python" padrão para 2, chamamos "python3" explicitamente
-        python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
-        
-        echo "VBMeta criado com sucesso!"
-      working-directory: .
-
-    - name: Enviar Tudo (Kernel + VBMeta)
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ steps.buildKernel.outputs.details }}
-        path: |
-          kernel_source/arch/arm64/boot/Image
-          vbmeta_disabled.img
+        echo "=== M
