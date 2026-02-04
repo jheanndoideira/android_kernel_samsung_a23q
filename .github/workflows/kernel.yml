@@ -1,4 +1,4 @@
-name: A23_Final_Boss_Android16
+name: A23_God_Mode_A16
 on:
   workflow_dispatch:
 
@@ -22,12 +22,10 @@ jobs:
       - name: Get Toolchains
         run: |
           mkdir toolchains && cd toolchains
-          # Clang 12 (Estável e compatível com Samsung)
           git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
-          # GCC 4.9 (Obrigatório para compilar sem erros de assembly)
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
 
-      - name: Inject KernelSU Next (Root)
+      - name: Inject KernelSU Next
         run: |
           cd kernel_source
           git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
@@ -36,7 +34,7 @@ jobs:
           echo "obj-y += kernelsu/" >> drivers/Makefile
           sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
 
-      - name: Inject SUSFS (Esconder Root no Android 16)
+      - name: Inject SUSFS
         run: |
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c kernel_source/fs/
@@ -45,36 +43,37 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      # === CORREÇÕES DEFINITIVAS DE PASTA ===
-      - name: Apply Path Fixes (Audio/Camera/Display)
+      # === AS CORREÇÕES QUE FUNCIONARAM (GOD MODE) ===
+      - name: God Mode Fixes (Audio, Camera, Display)
         run: |
-          echo "=== Corrigindo ÁUDIO (Regmap, Algo, Physical) ==="
+          echo "=== 1. Correções de ÁUDIO ==="
           cd kernel_source/techpack/audio/asoc/codecs/tas256x/os_layer/src
           
-          # Cria atalhos para as pastas que o compilador não acha
+          # Fix: Atalhos
           ln -sf ../../physical_layer physical_layer
           ln -sf ../../logical_layer logical_layer
           
-          # Reescreve o código para apontar para o lugar certo (../inc)
+          # Fix: Código .c
           sed -i 's|"os_layer/inc/tas256x-regmap.h"|"../inc/tas256x-regmap.h"|g' tas256x-codec.c
           sed -i 's|"algo/inc/tas_smart_amp_v2.h"|"../../algo/inc/tas_smart_amp_v2.h"|g' tas256x-codec.c
           
-          # Corrige o arquivo dentro da pasta ALGO (Erro da linha 30)
+          # Fix: Header Algo
           cd ../../algo/inc
           sed -i 's|"physical_layer/inc/tas256x.h"|"../../physical_layer/inc/tas256x.h"|g' tas_smart_amp_v2.h
           
-          echo "=== Corrigindo CÂMERA (Core, Interface, Defs) ==="
+          echo "=== 2. Correções de CÂMERA ==="
           cd $GITHUB_WORKSPACE/kernel_source/techpack/camera/drivers/cam_utils
           ln -sf ../cam_req_mgr/cam_req_mgr_core.h cam_req_mgr_core.h
           ln -sf ../cam_req_mgr/cam_req_mgr_interface.h cam_req_mgr_interface.h
           ln -sf ../cam_req_mgr/cam_req_mgr_core_defs.h cam_req_mgr_core_defs.h
           
-          echo "=== Corrigindo DISPLAY (Trace Error) ==="
+          echo "=== 3. Correção de DISPLAY ==="
           cd $GITHUB_WORKSPACE/kernel_source/techpack/display/pll
-          # Corrige o caminho relativo do trace
           sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
+          
+          echo "TODAS AS CORREÇÕES APLICADAS!"
 
-      - name: Build Kernel (ANDROID 16 + BRUTE FORCE)
+      - name: Build Kernel (ANDROID 16 READY)
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
@@ -85,7 +84,8 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # === CONFIGURAÇÃO PARA ANDROID 16 & GAMING ===
+          # === AQUI ESTÁ A ADAPTAÇÃO PARA ANDROID 16 ===
+          # Mantivemos tudo igual, só adicionamos OverlayFS e BPF
           ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
@@ -107,12 +107,8 @@ jobs:
             
           make olddefconfig
           
-          echo "=== COMPILANDO (IGNORANDO ERROS NÃO-FATAIS) ==="
-          # -w: Silencia avisos
-          # -Wno-error: Impede que avisos virem erros
-          # -fcommon: Compatibilidade máxima
-          export KCFLAGS="-O3 -w -Wno-error -fno-builtin -fcommon -pipe -march=armv8-a+crc+crypto"
-          
+          echo "=== INICIANDO COMPILAÇÃO === "
+          export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
           make -j$(nproc --all) \
               CC=clang \
               CROSS_COMPILE=aarch64-linux-android- \
@@ -128,7 +124,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-Android16-Kernel
+          name: A23-GodMode-A16
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
