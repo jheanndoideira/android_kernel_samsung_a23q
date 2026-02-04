@@ -1,4 +1,4 @@
-name: Build A235M Ultimate (Clang 12 + Performance)
+name: Build A235M Final (Clang 12 Git + Fixes)
 on:
   workflow_dispatch:
     inputs:
@@ -24,19 +24,19 @@ jobs:
       run: |
         sudo apt update -y
         sudo apt install bc cpio flex bison git gcc g++ tar perl curl libc++-dev lz4 libssl-dev python2 -y
-        # Força Python 2 para evitar erro de sintaxe nos scripts da Samsung
         sudo ln -sf /usr/bin/python2 /usr/bin/python
       working-directory: .
 
-    - name: Baixar Toolchains (Clang 12 Estável)
+    - name: Baixar Toolchains (Método Seguro)
       run: |
         mkdir toolchains && cd toolchains
-        mkdir clang && cd clang
-        # Usando Clang r416183b1 (Versão 12) - Corrige o erro "literal value out of range"
-        wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r416183b1.tar.gz
-        tar -xf clang-r416183b1.tar.gz && rm clang-r416183b1.tar.gz
-        cd ..
-        # GCC 4.9 para compatibilidade
+        
+        # CLANG 12: Baixando via GIT do repositório ZyCromerZ (Mais estável que o link da Google)
+        echo "Baixando Clang 12..."
+        git clone --depth=1 https://github.com/ZyCromerZ/Clang -b 12.0 clang
+        
+        # GCC 4.9: Baixando da LineageOS
+        echo "Baixando GCC..."
         git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
       working-directory: .
 
@@ -44,10 +44,8 @@ jobs:
       run: |
         cd kernel_source
         echo "=== Clonando KernelSU Next ==="
-        # Clona direto na branch 'next' para evitar erros de pathspec
         git clone --depth 1 https://github.com/rifsxd/KernelSU-Next -b next drivers/kernelsu
         
-        # Configura o kernel para reconhecer o KSU
         echo "obj-y += kernelsu/" >> drivers/Makefile
         sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
       working-directory: .
@@ -58,9 +56,7 @@ jobs:
         cp susfs4ksu/kernel_patches/fs/susfs.c kernel_source/fs/
         cp susfs4ksu/kernel_patches/include/linux/susfs.h kernel_source/include/linux/
         cd kernel_source
-        # Tenta aplicar o patch automaticamente, se falhar, continua
         patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-        # Garante a compilação no Makefile
         if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
       working-directory: .
 
@@ -74,7 +70,7 @@ jobs:
         
         cd kernel_source
         
-        # 1. Localiza o arquivo de configuração (mesmo se estiver na pasta vendor)
+        # Localiza config
         TARGET_FILE=$(find arch/arm64/configs -name "*${{ github.event.inputs.DICA_CONFIG }}*defconfig*" | head -n 1)
         if [ -z "$TARGET_FILE" ]; then echo "ERRO: Config não encontrada"; exit 1; fi
         MAKE_TARGET=${TARGET_FILE#arch/arm64/configs/}
@@ -85,30 +81,20 @@ jobs:
         make $MAKE_TARGET
         
         echo "=== ATIVANDO TURBO MODE ==="
-        
-        # Ativa Root e Invisibilidade
         ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
             --enable CONFIG_KSU_SUSFS_SUS_PATH \
-            --enable CONFIG_KSU_SUSFS_SUS_MOUNT
-        
-        # OTIMIZAÇÕES DE CPU
-        ./scripts/config --file .config \
+            --enable CONFIG_KSU_SUSFS_SUS_MOUNT \
             --enable CONFIG_JUMP_LABEL \
-            --enable CONFIG_HZ_300
-        
-        # REMOVE PESO MORTO (Samsung Bloat & Segurança Excessiva)
-        ./scripts/config --file .config \
+            --enable CONFIG_HZ_300 \
             --disable CONFIG_DEBUG_KERNEL \
             --disable CONFIG_SAMSUNG_DEBUG \
             --disable CONFIG_FTRACE \
             --disable CONFIG_PROFILING \
-            --disable CONFIG_STACKPROTECTOR_STRONG \
-            --disable CONFIG_SOFTLOCKUP_DETECTOR \
-            --disable CONFIG_HARDLOCKUP_DETECTOR
+            --disable CONFIG_STACKPROTECTOR_STRONG
         
-        # O PULO DO GATO: Responde "Sim/Não" automaticamente para tudo e evita travar
+        # Resposta automática para não travar
         make olddefconfig
       working-directory: .
 
@@ -119,7 +105,7 @@ jobs:
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-android-
         export CLANG_TRIPLE=aarch64-linux-gnu-
-        # Flags O3 sem polly (para estabilidade no Clang 12)
+        # Clang 12 não precisa de polly, e removemos para evitar erros
         export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
         
         cd kernel_source
@@ -131,17 +117,16 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             LLVM=1 LLVM_IAS=1
 
-        echo "details=A235M-ULTIMATE-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+        echo "details=A235M-FPS-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
       working-directory: .
 
     - name: Criar VBMeta Disabled
       run: |
         wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
-        # Usa python3 explicitamente para a ferramenta AVB
         python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
       working-directory: .
 
-    - name: Enviar Tudo (Kernel + VBMeta)
+    - name: Enviar Tudo
       uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.buildKernel.outputs.details }}
