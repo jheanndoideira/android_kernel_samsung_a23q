@@ -1,4 +1,4 @@
-name: A23_GPS_Guided_Strike
+name: A23_Ultimatum_A16
 on:
   workflow_dispatch:
 
@@ -43,37 +43,47 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      # === CORREÇÕES COM NAVEGAÇÃO ABSOLUTA (GPS) ===
+      # === LISTA DE CORREÇÕES ATUALIZADA (Ultimatum) ===
       - name: Apply GPS Fixes (Audio/Camera/Display)
         run: |
-          # Define a raiz para facilitar
           ROOT=$GITHUB_WORKSPACE/kernel_source
           
           echo "=== 1. ÁUDIO: Raiz do Codec ==="
           cd $ROOT/techpack/audio/asoc/codecs/tas256x/os_layer/src
           ln -sf ../../physical_layer physical_layer
           ln -sf ../../logical_layer logical_layer
-          # Sed fixes
-          sed -i 's|"os_layer/inc/tas256x-regmap.h"|"../inc/tas256x-regmap.h"|g' tas256x-codec.c
-          sed -i 's|"algo/inc/tas_smart_amp_v2.h"|"../../algo/inc/tas_smart_amp_v2.h"|g' tas256x-codec.c
           
-          echo "=== 2. ÁUDIO: Logical Layer (Onde deu o erro de compilação) ==="
+          # Fix Linha 48 (Regmap)
+          sed -i 's|"os_layer/inc/tas256x-regmap.h"|"../inc/tas256x-regmap.h"|g' tas256x-codec.c
+          # Fix Linha 50 (Smart Amp)
+          sed -i 's|"algo/inc/tas_smart_amp_v2.h"|"../../algo/inc/tas_smart_amp_v2.h"|g' tas256x-codec.c
+          # === NOVO FIX: Linha 51 (Calib) ===
+          sed -i 's|"algo/inc/tas25xx-calib.h"|"../../algo/inc/tas25xx-calib.h"|g' tas256x-codec.c
+          
+          echo "=== 2. ÁUDIO: Logical Layer ==="
           cd $ROOT/techpack/audio/asoc/codecs/tas256x/os_layer/src/logical_layer/inc
           ln -sf ../../physical_layer physical_layer
           
-          echo "=== 3. ÁUDIO: Algo Header (Onde eu errei o CD antes) ==="
-          # Agora usando caminho absoluto, impossível errar
+          echo "=== 3. ÁUDIO: Algo Header ==="
           cd $ROOT/techpack/audio/asoc/codecs/tas256x/algo/inc
           sed -i 's|"physical_layer/inc/tas256x.h"|"../../physical_layer/inc/tas256x.h"|g' tas_smart_amp_v2.h
           
-          echo "=== 4. CÂMERA: Todos os headers ==="
+          echo "=== 4. CÂMERA: Utils (Onde os arquivos se perdem) ==="
           cd $ROOT/techpack/camera/drivers/cam_utils
+          # Família Req Mgr
           ln -sf ../cam_req_mgr/cam_req_mgr_core.h cam_req_mgr_core.h
           ln -sf ../cam_req_mgr/cam_req_mgr_interface.h cam_req_mgr_interface.h
           ln -sf ../cam_req_mgr/cam_req_mgr_core_defs.h cam_req_mgr_core_defs.h
           ln -sf ../cam_req_mgr/cam_req_mgr_util.h cam_req_mgr_util.h
+          # === NOVO FIX: Timer ===
+          ln -sf ../cam_req_mgr/cam_req_mgr_timer.h cam_req_mgr_timer.h
           
-          echo "=== 5. DISPLAY: Trace path ==="
+          echo "=== 5. CÂMERA: CCI (Onde deu o erro novo) ==="
+          cd $ROOT/techpack/camera/drivers/cam_sensor_module/cam_cci
+          # Força o código a procurar o arquivo na própria pasta (./)
+          sed -i 's|#include "cam_cci_dev.h"|#include "./cam_cci_dev.h"|g' cam_cci_dev.c
+          
+          echo "=== 6. DISPLAY: Trace path ==="
           cd $ROOT/techpack/display/pll
           sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
 
@@ -88,7 +98,7 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # === CONFIG DO ANDROID 16 ===
+          # === CONFIG ANDROID 16 ===
           ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
@@ -110,7 +120,7 @@ jobs:
             
           make olddefconfig
           
-          echo "=== COMPILANDO (FORÇA BRUTA) ==="
+          echo "=== COMPILANDO (MODO GUERREIRO) ==="
           export KCFLAGS="-O3 -w -Wno-error -fno-builtin -fcommon -pipe -march=armv8-a+crc+crypto"
           
           make -j$(nproc --all) \
@@ -128,7 +138,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-GPS-Kernel-A16
+          name: A23-Ultimatum-A16
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
