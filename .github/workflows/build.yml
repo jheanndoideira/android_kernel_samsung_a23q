@@ -1,4 +1,4 @@
-name: Build A235M Performance (KSU Next + SUSFS)
+  name: Build A235M Performance (KSU Next + SUSFS)
 on:
   workflow_dispatch:
     inputs:
@@ -144,38 +144,4 @@ jobs:
       with:
         name: ${{ steps.buildKernel.outputs.details }}
         path: kernel_source/arch/arm64/boot/Image
-
-        export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
-        export ARCH=arm64
-        export CROSS_COMPILE=aarch64-linux-android-
-        export CLANG_TRIPLE=aarch64-linux-gnu-
-        
-        # Flags de Performance
-        export CC=clang
-        export LLVM=1
-        export LLVM_IAS=1
-        export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto -mllvm -polly"
-        
-        cd kernel_source
-        make -C . O=out ${{ github.event.inputs.DEFCONFIG }}
-
-        # Ativar Flags de Root e Invisibilidade
-        echo "CONFIG_KSU=y" >> out/.config
-        echo "CONFIG_KSU_SUSFS=y" >> out/.config
-        echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> out/.config
-        echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> out/.config
-
-        # Compilação
-        make -j$(nproc --all) -C . O=out \
-            CC=clang LLVM=1 LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CLANG_TRIPLE=aarch64-linux-gnu-
-
-        echo "details=A235M-ULTRA-NEXT-SUSFS-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
-      working-directory: .
-
-    - name: Enviar Kernel (Image)
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ steps.buildKernel.outputs.details }}
-        path: kernel_source/out/arch/arm64/boot/Image
+    
