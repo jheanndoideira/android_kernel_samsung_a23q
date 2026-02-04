@@ -1,4 +1,4 @@
-name: A23_Ultimate_Fix
+name: A23_Camera_Slayer
 on:
   workflow_dispatch:
 
@@ -43,32 +43,30 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      # === AQUI ESTÁ O TRUQUE DE MESTRE ===
+      # === FIX CUMULATIVO (ÁUDIO + CÂMERA 1 + CÂMERA 2) ===
       - name: Universal Path Fixes
         run: |
-          echo "=== Entrando no Labirinto do Áudio ==="
+          echo "=== 1. Mantendo o Áudio Funcionando ==="
           cd kernel_source/techpack/audio/asoc/codecs/tas256x/os_layer/src
-          
-          # Fix 1 (Antigo): Traz as pastas physical e logical para cá
           ln -sf ../../physical_layer physical_layer
           ln -sf ../../logical_layer logical_layer
-          
-          # Fix 2 (O NOVO - Linha 48): Cria um espelho da pasta mãe aqui dentro
-          # Isso faz com que "include os_layer/..." funcione magicamente
           ln -sf .. os_layer
           
-          echo "=== Entrando na Toca do Coelho (Logical Layer) ==="
+          echo "=== 2. Consertando a Logical Layer (Áudio) ==="
           cd ../../logical_layer/inc
-          # Fix 3 (Antigo): Traz a physical_layer para cá também
           ln -sf ../../physical_layer physical_layer
           
-          echo "=== Consertando a Câmera ==="
-          # Volta para a raiz total
-          cd $GITHUB_WORKSPACE/kernel_source
-          cd techpack/camera/drivers/cam_utils
+          echo "=== 3. O NOVO FIX DA CÂMERA ==="
+          # Vamos para a pasta utils da câmera onde deu o erro
+          cd $GITHUB_WORKSPACE/kernel_source/techpack/camera/drivers/cam_utils
+          
+          # Fix antigo (Core)
           ln -sf ../cam_req_mgr/cam_req_mgr_core.h cam_req_mgr_core.h
           
-          echo "Todos os caminhos (físico, lógico e sistema) foram consertados!"
+          # Fix NOVO (Interface - O erro de agora)
+          ln -sf ../cam_req_mgr/cam_req_mgr_interface.h cam_req_mgr_interface.h
+          
+          echo "Correção aplicada: Interface da câmera conectada!"
 
       - name: Build Kernel (SILENT & POWERFUL)
         run: |
