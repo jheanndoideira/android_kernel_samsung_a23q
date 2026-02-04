@@ -1,4 +1,4 @@
-name: A23_Ultimate_Build
+name: A23_Balanced_Fixed
 on:
   workflow_dispatch:
 
@@ -22,7 +22,9 @@ jobs:
       - name: Get Toolchains
         run: |
           mkdir toolchains && cd toolchains
+          # Clang 12 (crDroid)
           git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
+          # GCC 4.9 (LineageOS) - Esse será o herói que vai compilar o arquivo que deu erro
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
 
       - name: Inject KernelSU Next
@@ -43,7 +45,7 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      - name: Build Kernel
+      - name: Build Kernel (IAS DISABLED)
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
@@ -51,7 +53,11 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           cd kernel_source
           make clean && make mrproper
+          
+          # Carrega a config certa
           make vendor/a23_eur_open_defconfig
+          
+          # === OTIMIZAÇÃO BALANCED ===
           ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
@@ -59,11 +65,24 @@ jobs:
             --enable CONFIG_KSU_SUSFS_SUS_MOUNT \
             --enable CONFIG_JUMP_LABEL \
             --enable CONFIG_HZ_300 \
+            --enable CONFIG_PREEMPT \
+            --disable CONFIG_HZ_100 \
             --disable CONFIG_DEBUG_KERNEL \
-            --disable CONFIG_SAMSUNG_DEBUG
+            --disable CONFIG_SAMSUNG_DEBUG \
+            --disable CONFIG_FTRACE \
+            --disable CONFIG_PROFILING
+            
           make olddefconfig
+          
+          echo "=== INICIANDO COMPILAÇÃO COM FIX DE ASSEMBLY ==="
+          # A MUDANÇA ESTÁ AQUI EMBAIXO: LLVM_IAS=0
           export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
-          make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1
+          make -j$(nproc --all) \
+              CC=clang \
+              CROSS_COMPILE=aarch64-linux-android- \
+              CLANG_TRIPLE=aarch64-linux-gnu- \
+              LLVM=1 \
+              LLVM_IAS=0
 
       - name: Create VBMeta
         run: |
@@ -73,7 +92,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-Performance-Kernel
+          name: A23-Balanced-Kernel
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
