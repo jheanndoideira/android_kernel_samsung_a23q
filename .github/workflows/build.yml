@@ -83,4 +83,78 @@ jobs:
         
         cd kernel_source
         
-        echo "=== M
+        echo "=== MODO DETETIVE: LISTANDO ARQUIVOS DE CONFIGURAÇÃO ==="
+        # Isso vai mostrar no LOG todos os nomes possíveis. Se der erro, olhe aqui!
+        ls arch/arm64/configs/ | grep a23 || ls arch/arm64/configs/
+        echo "========================================================"
+        
+        # Limpa builds anteriores
+        make clean && make mrproper
+        
+        # Tenta criar a config
+        make ${{ github.event.inputs.DEFCONFIG }}
+        
+        echo "=== APLICANDO OTIMIZAÇÕES DE FPS ==="
+        # Ativa Root e Invisibilidade
+        ./scripts/config --file .config \
+            --enable CONFIG_KSU \
+            --enable CONFIG_KSU_SUSFS \
+            --enable CONFIG_KSU_SUSFS_SUS_PATH \
+            --enable CONFIG_KSU_SUSFS_SUS_MOUNT
+
+        # DESATIVA LIXO DA SAMSUNG (Performance Boost)
+        ./scripts/config --file .config \
+            --disable CONFIG_DEBUG_KERNEL \
+            --disable CONFIG_DEBUG_INFO \
+            --disable CONFIG_FRAME_POINTER \
+            --disable CONFIG_KALLSYMS \
+            --disable CONFIG_SCHED_DEBUG \
+            --disable CONFIG_FTRACE \
+            --disable CONFIG_SAMSUNG_DEBUG \
+            --disable CONFIG_SEC_DEBUG
+            
+        echo "Configuração pronta!"
+      working-directory: .
+
+    - name: Compilar Kernel (Turbo Mode)
+      id: buildKernel
+      run: |
+        export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-android-
+        export CLANG_TRIPLE=aarch64-linux-gnu-
+        
+        cd kernel_source
+        
+        # Flags O3 + Polly (Máxima Velocidade)
+        export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto -mllvm -polly"
+        
+        echo "Iniciando compilação..."
+        make -j$(nproc --all) \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 \
+            LLVM_IAS=1
+
+        echo "details=A235M-ULTIMATE-FPS-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+      working-directory: .
+
+    - name: Criar VBMeta Disabled
+      run: |
+        # Baixa a ferramenta oficial
+        wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
+        
+        # Usa python3 explicitamente (já que o padrão virou python2 no passo 2)
+        python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
+        
+        echo "VBMeta criado!"
+      working-directory: .
+
+    - name: Enviar Tudo
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.buildKernel.outputs.details }}
+        path: |
+          kernel_source/arch/arm64/boot/Image
+          vbmeta_disabled.img
