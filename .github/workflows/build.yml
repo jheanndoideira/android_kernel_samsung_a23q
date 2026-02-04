@@ -1,11 +1,11 @@
-name: Build A235M Ultimate (Debug + Fixes)
+name: Build A235M (Auto-Detect Config)
 on:
   workflow_dispatch:
     inputs:
-      DEFCONFIG:
-        description: 'Nome do Defconfig (Ex: a23q_defconfig)'
-        default: 'a23q_defconfig'
-        required: true
+      DEFCONFIG_NAME_HINT:
+        description: 'Dica do nome (deixe a23q)'
+        default: 'a23q'
+        required: false
 
 jobs:
   build:
@@ -20,60 +20,40 @@ jobs:
         path: kernel_source
         fetch-depth: 1
 
-    - name: Instalar Dependências e Fix Python 2
+    - name: Instalar Dependências e Python 2
       run: |
         sudo apt update -y
-        # Instala Python 2 e ferramentas essenciais
         sudo apt install bc cpio flex bison git gcc g++ tar perl curl libc++-dev lz4 libssl-dev python2 -y
-        
-        # O TRUQUE: Força o sistema a usar Python 2 (resolve o erro SyntaxError)
         sudo ln -sf /usr/bin/python2 /usr/bin/python
-        
-        echo "Versão do Python ativa:"
-        python --version
       working-directory: .
 
-    - name: Baixar Toolchains (Clang + GCC)
+    - name: Baixar Toolchains
       run: |
-        mkdir toolchains
-        cd toolchains
-        
-        # Clang Google (Oficial)
+        mkdir toolchains && cd toolchains
         mkdir clang && cd clang
         wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522817.tar.gz
         tar -xf clang-r522817.tar.gz && rm clang-r522817.tar.gz
         cd ..
-        
-        # GCC 4.9 (Essencial para Samsung 4.19)
         git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
       working-directory: .
 
     - name: Injetar KernelSU Next
       run: |
-        echo "=== Baixando KernelSU Next ==="
         cd kernel_source
         curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
       working-directory: .
 
     - name: Injetar SUSFS 1.5.5
       run: |
-        echo "=== Baixando SUSFS ==="
         git clone https://gitlab.com/simonpunk/susfs4ksu.git
-        
         cp susfs4ksu/kernel_patches/fs/susfs.c kernel_source/fs/
         cp susfs4ksu/kernel_patches/include/linux/susfs.h kernel_source/include/linux/
-        
         cd kernel_source
-        # Tenta aplicar patch (se falhar, ignora e fazemos manual no makefile)
         patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-        
-        # Garante a inclusão no Makefile
-        if ! grep -q "susfs" fs/Makefile; then
-            echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
-        fi
+        if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
       working-directory: .
 
-    - name: Configurar e Otimizar (Passo Crítico)
+    - name: Configurar Automaticamente (FIX VENDOR)
       run: |
         export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
         export ARCH=arm64
@@ -83,72 +63,62 @@ jobs:
         
         cd kernel_source
         
-        echo "=== MODO DETETIVE: LISTANDO ARQUIVOS DE CONFIGURAÇÃO ==="
-        # Isso vai mostrar no LOG todos os nomes possíveis. Se der erro, olhe aqui!
-        ls arch/arm64/configs/ | grep a23 || ls arch/arm64/configs/
-        echo "========================================================"
+        echo "=== RASTREANDO ARQUIVO DE CONFIGURAÇÃO ==="
+        # Procura qualquer arquivo que tenha 'a23' no nome dentro da pasta configs
+        TARGET_FILE=$(find arch/arm64/configs -name "*a23*defconfig*" | head -n 1)
         
-        # Limpa builds anteriores
+        if [ -z "$TARGET_FILE" ]; then
+            echo "ERRO CRÍTICO: Não achei nenhum arquivo com 'a23' no nome."
+            echo "Listando tudo em 'vendor' para você ver:"
+            ls -R arch/arm64/configs/vendor/ || ls -R arch/arm64/configs/
+            exit 1
+        fi
+        
+        echo "Arquivo encontrado: $TARGET_FILE"
+        
+        # O comando make precisa do caminho relativo a 'arch/arm64/configs/'
+        # Exemplo: se achou 'arch/arm64/configs/vendor/a23q_defconfig', o comando deve ser 'make vendor/a23q_defconfig'
+        MAKE_TARGET=${TARGET_FILE#arch/arm64/configs/}
+        
+        echo "Comando Make será: make $MAKE_TARGET"
+        
         make clean && make mrproper
+        make $MAKE_TARGET
         
-        # Tenta criar a config
-        make ${{ github.event.inputs.DEFCONFIG }}
-        
-        echo "=== APLICANDO OTIMIZAÇÕES DE FPS ==="
-        # Ativa Root e Invisibilidade
+        echo "=== APLICANDO OTIMIZAÇÕES ==="
         ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
             --enable CONFIG_KSU_SUSFS_SUS_PATH \
-            --enable CONFIG_KSU_SUSFS_SUS_MOUNT
-
-        # DESATIVA LIXO DA SAMSUNG (Performance Boost)
-        ./scripts/config --file .config \
+            --enable CONFIG_KSU_SUSFS_SUS_MOUNT \
             --disable CONFIG_DEBUG_KERNEL \
-            --disable CONFIG_DEBUG_INFO \
-            --disable CONFIG_FRAME_POINTER \
-            --disable CONFIG_KALLSYMS \
-            --disable CONFIG_SCHED_DEBUG \
-            --disable CONFIG_FTRACE \
-            --disable CONFIG_SAMSUNG_DEBUG \
-            --disable CONFIG_SEC_DEBUG
-            
-        echo "Configuração pronta!"
+            --disable CONFIG_SAMSUNG_DEBUG
       working-directory: .
 
-    - name: Compilar Kernel (Turbo Mode)
+    - name: Compilar Kernel
       id: buildKernel
       run: |
         export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-android-
         export CLANG_TRIPLE=aarch64-linux-gnu-
+        export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto -mllvm -polly"
         
         cd kernel_source
         
-        # Flags O3 + Polly (Máxima Velocidade)
-        export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto -mllvm -polly"
-        
-        echo "Iniciando compilação..."
         make -j$(nproc --all) \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-android- \
             CLANG_TRIPLE=aarch64-linux-gnu- \
-            LLVM=1 \
-            LLVM_IAS=1
+            LLVM=1 LLVM_IAS=1
 
-        echo "details=A235M-ULTIMATE-FPS-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+        echo "details=A235M-PERF-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
       working-directory: .
 
     - name: Criar VBMeta Disabled
       run: |
-        # Baixa a ferramenta oficial
         wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
-        
-        # Usa python3 explicitamente (já que o padrão virou python2 no passo 2)
         python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
-        
-        echo "VBMeta criado!"
       working-directory: .
 
     - name: Enviar Tudo
