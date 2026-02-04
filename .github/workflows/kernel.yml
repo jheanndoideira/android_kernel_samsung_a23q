@@ -1,4 +1,4 @@
-name: A23_Camera_Slayer
+name: A23_Surgery_Fix
 on:
   workflow_dispatch:
 
@@ -43,30 +43,30 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      # === FIX CUMULATIVO (ÁUDIO + CÂMERA 1 + CÂMERA 2) ===
-      - name: Universal Path Fixes
+      # === AQUI ESTÁ A CIRURGIA (CORREÇÃO DIRETA NO CÓDIGO) ===
+      - name: Surgical Fixes (Audio & Camera)
         run: |
-          echo "=== 1. Mantendo o Áudio Funcionando ==="
+          echo "=== 1. Cirurgia no Áudio (tas256x) ==="
           cd kernel_source/techpack/audio/asoc/codecs/tas256x/os_layer/src
+          
+          # Mantemos os atalhos que já funcionaram antes
           ln -sf ../../physical_layer physical_layer
           ln -sf ../../logical_layer logical_layer
-          ln -sf .. os_layer
           
-          echo "=== 2. Consertando a Logical Layer (Áudio) ==="
+          # O NOVO FIX: Reescreve a linha bugada dentro do arquivo tas256x-codec.c
+          # Troca "os_layer/inc/tas256x-regmap.h" por "../inc/tas256x-regmap.h"
+          sed -i 's|"os_layer/inc/tas256x-regmap.h"|"../inc/tas256x-regmap.h"|g' tas256x-codec.c
+          
+          echo "=== 2. Fix na Logical Layer (Já testado) ==="
           cd ../../logical_layer/inc
           ln -sf ../../physical_layer physical_layer
           
-          echo "=== 3. O NOVO FIX DA CÂMERA ==="
-          # Vamos para a pasta utils da câmera onde deu o erro
+          echo "=== 3. Fix na Câmera (Prevenção) ==="
           cd $GITHUB_WORKSPACE/kernel_source/techpack/camera/drivers/cam_utils
-          
-          # Fix antigo (Core)
           ln -sf ../cam_req_mgr/cam_req_mgr_core.h cam_req_mgr_core.h
-          
-          # Fix NOVO (Interface - O erro de agora)
           ln -sf ../cam_req_mgr/cam_req_mgr_interface.h cam_req_mgr_interface.h
           
-          echo "Correção aplicada: Interface da câmera conectada!"
+          echo "Código corrigido na força bruta!"
 
       - name: Build Kernel (SILENT & POWERFUL)
         run: |
