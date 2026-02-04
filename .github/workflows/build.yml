@@ -18,7 +18,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         repository: potatogeek/kernel-a235m-f
-        ref: android-4.19-stable
+        ref: main
         path: android_kernel_samsung_a23
         fetch-depth: 1
         
