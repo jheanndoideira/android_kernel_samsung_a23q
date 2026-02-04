@@ -1,4 +1,4 @@
-name: Build A235M Performance (KSU Next + SUSFS)
+name: Build A235M Ultimate (FPS Fix + VBMeta)
 on:
   workflow_dispatch:
     inputs:
@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04 # Fixamos no 22.04 para melhor compatibilidade com Python 2
     
     steps:
     - name: Checkout Kernel Source
@@ -20,12 +20,20 @@ jobs:
         path: kernel_source
         fetch-depth: 1
 
-    - name: Instalar Dependências
+    - name: Instalar Dependências e Python 2
       run: |
         sudo apt update -y
-        sudo apt install bc cpio flex bison git gcc g++ python-is-python3 tar perl curl libc++-dev lz4 libssl-dev -y
+        # Instala Python 2 e ferramentas
+        sudo apt install bc cpio flex bison git gcc g++ tar perl curl libc++-dev lz4 libssl-dev python2 -y
+        
+        # Link simbólico para forçar "python" a ser python2 durante a build
+        sudo ln -sf /usr/bin/python2 /usr/bin/python
+        
+        echo "Versão do Python configurada:"
+        python --version
+      working-directory: .
 
-    - name: Baixar Toolchains (Otimizadas)
+    - name: Baixar Toolchains
       run: |
         mkdir toolchains
         cd toolchains
@@ -34,17 +42,15 @@ jobs:
         wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522817.tar.gz
         tar -xf clang-r522817.tar.gz && rm clang-r522817.tar.gz
         cd ..
-        # GCC para compatibilidade
+        # GCC 4.9 (Essencial para esse kernel)
         git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
       working-directory: .
 
-    - name: Injetar KernelSU Next (Link Corrigido)
+    - name: Injetar KernelSU Next
       run: |
         echo "=== Baixando KernelSU Next ==="
         cd kernel_source
-        # AQUI ESTAVA O ERRO: Usando curl oficial do rifsxd para evitar erro 404
         curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
-        echo "KernelSU Next configurado com sucesso!"
       working-directory: .
 
     - name: Injetar SUSFS 1.5.5
@@ -52,24 +58,20 @@ jobs:
         echo "=== Baixando SUSFS ==="
         git clone https://gitlab.com/simonpunk/susfs4ksu.git
         
-        # Copiando arquivos essenciais
         cp susfs4ksu/kernel_patches/fs/susfs.c kernel_source/fs/
         cp susfs4ksu/kernel_patches/include/linux/susfs.h kernel_source/include/linux/
         
         cd kernel_source
-        
-        # Tentativa de patch automático. Se falhar, fazemos manual.
-        # O "|| true" impede que o script pare se houver um erro pequeno de patch
+        # Tenta aplicar o patch, se falhar, continua (|| true)
         patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
         
-        # Garantia: Se o patch falhou em adicionar ao Makefile, adicionamos na força bruta
+        # Garante a inclusão no Makefile
         if ! grep -q "susfs" fs/Makefile; then
-            echo "Forçando SUSFS no Makefile..."
             echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
         fi
       working-directory: .
 
-    - name: Preparar e Limpar (Debloat de Performance)
+    - name: Configurar e Otimizar (Debloat)
       run: |
         export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
         export ARCH=arm64
@@ -78,35 +80,29 @@ jobs:
         export CC=clang
         
         cd kernel_source
-        make clean && make mrproper
+        
+        # Gera a configuração padrão
         make ${{ github.event.inputs.DEFCONFIG }}
         
-        echo "=== APLICANDO OTIMIZAÇÕES DE FPS ==="
-        
-        # 1. Ativar KSU e SUSFS
+        echo "=== APLICANDO OTIMIZAÇÕES ==="
+        # Ativa KSU e SUSFS
         ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
             --enable CONFIG_KSU_SUSFS_SUS_PATH \
             --enable CONFIG_KSU_SUSFS_SUS_MOUNT
-            
-        # 2. REMOVER DEBUG (Isso libera CPU para Jogo!)
-        # Desativa logs excessivos, checagens de memória e tracing
+
+        # Desativa Debug (Debloat)
         ./scripts/config --file .config \
             --disable CONFIG_DEBUG_KERNEL \
             --disable CONFIG_DEBUG_INFO \
             --disable CONFIG_FRAME_POINTER \
             --disable CONFIG_KALLSYMS \
-            --disable CONFIG_KALLSYMS_ALL \
             --disable CONFIG_SCHED_DEBUG \
-            --disable CONFIG_SCHED_INFO \
-            --disable CONFIG_FTRACE \
-            --disable CONFIG_PROFILING
-            
-        echo "Configuração otimizada aplicada."
+            --disable CONFIG_FTRACE
       working-directory: .
 
-    - name: Compilar Kernel (Modo Turbo)
+    - name: Compilar Kernel (Fix Python Error)
       id: buildKernel
       run: |
         export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
@@ -114,12 +110,12 @@ jobs:
         export CROSS_COMPILE=aarch64-linux-android-
         export CLANG_TRIPLE=aarch64-linux-gnu-
         
-        # Flags de Otimização Agressiva
-        export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto -mllvm -polly"
-        
         cd kernel_source
         
-        echo "Iniciando compilação..."
+        # Flags O3 + Polly
+        export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto -mllvm -polly"
+        
+        echo "Compilando..."
         make -j$(nproc --all) \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-android- \
@@ -127,20 +123,25 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1
 
-        echo "details=A235M-PERF-KSU-NEXT-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+        echo "details=A235M-PERF-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
       working-directory: .
 
-    - name: Verificar Arquivo
+    - name: Criar VBMeta Disabled (Automático)
       run: |
-        if [ -f kernel_source/arch/arm64/boot/Image ]; then
-            echo "SUCESSO: Kernel compilado!"
-        else
-            echo "FALHA: Arquivo Image não gerado."
-            exit 1
-        fi
+        # Baixa a ferramenta oficial
+        wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
+        
+        # Usa Python 3 aqui (o avbtool novo exige py3)
+        # Como mudamos o "python" padrão para 2, chamamos "python3" explicitamente
+        python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
+        
+        echo "VBMeta criado com sucesso!"
+      working-directory: .
 
-    - name: Enviar Artifact
+    - name: Enviar Tudo (Kernel + VBMeta)
       uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.buildKernel.outputs.details }}
-        path: kernel_source/arch/arm64/boot/Image
+        path: |
+          kernel_source/arch/arm64/boot/Image
+          vbmeta_disabled.img
