@@ -55,3 +55,117 @@ jobs:
 
     - name: Injetar SUSFS 1.5.5
       run: |
+        git clone https://gitlab.com/simonpunk/susfs4ksu.git
+        cp susfs4ksu/kernel_patches/fs/susfs.c kernel_source/fs/
+        cp susfs4ksu/kernel_patches/include/linux/susfs.h kernel_source/include/linux/
+        cd kernel_source
+        
+        # Aplica patch (ignora erros leves)
+        patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+        
+        # Garante a compilação no Makefile se o patch falhar
+        if ! grep -q "susfs" fs/Makefile; then 
+            echo "Forçando SUSFS no Makefile..."
+            echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
+        fi
+      working-directory: .
+
+    - name: Configurar Kernel (Busca Inteligente)
+      run: |
+        export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-android-
+        export CLANG_TRIPLE=aarch64-linux-gnu-
+        export CC=clang
+        
+        cd kernel_source
+        
+        echo "=== LISTA DE ARQUIVOS (DEBUG) ==="
+        # Lista tudo para ajudar se der erro
+        ls -R arch/arm64/configs
+        echo "================================="
+        
+        echo "Procurando arquivo de configuração..."
+        
+        # TENTATIVA 1: Pelo nome que você deu (a23q)
+        TARGET_FILE=$(find arch/arm64/configs -name "*${{ github.event.inputs.DICA_CONFIG }}*defconfig*" | head -n 1)
+        
+        # TENTATIVA 2: Pelo codinome do chipset (bengal)
+        if [ -z "$TARGET_FILE" ]; then
+            echo "Tentativa 1 falhou. Procurando por 'bengal'..."
+            TARGET_FILE=$(find arch/arm64/configs -name "*bengal*defconfig*" | grep -v "debug" | head -n 1)
+        fi
+
+        # TENTATIVA 3: Qualquer defconfig na pasta vendor (Último recurso)
+        if [ -z "$TARGET_FILE" ]; then
+            echo "Tentativa 2 falhou. Pegando o primeiro defconfig encontrado na pasta vendor..."
+            TARGET_FILE=$(find arch/arm64/configs/vendor -name "*defconfig*" | grep -v "debug" | head -n 1)
+        fi
+        
+        # Se falhar tudo
+        if [ -z "$TARGET_FILE" ]; then 
+            echo "ERRO FATAL: Nenhum arquivo de configuração encontrado!"
+            exit 1
+        fi
+        
+        # Remove o caminho inicial para o comando make
+        MAKE_TARGET=${TARGET_FILE#arch/arm64/configs/}
+        echo "=== SUCESSO! Usando: $MAKE_TARGET ==="
+        
+        make clean && make mrproper
+        make $MAKE_TARGET
+        
+        echo "=== ATIVANDO TURBO MODE & ROOT ==="
+        ./scripts/config --file .config \
+            --enable CONFIG_KSU \
+            --enable CONFIG_KSU_SUSFS \
+            --enable CONFIG_KSU_SUSFS_SUS_PATH \
+            --enable CONFIG_KSU_SUSFS_SUS_MOUNT \
+            --enable CONFIG_JUMP_LABEL \
+            --enable CONFIG_HZ_300 \
+            --disable CONFIG_DEBUG_KERNEL \
+            --disable CONFIG_SAMSUNG_DEBUG \
+            --disable CONFIG_FTRACE \
+            --disable CONFIG_PROFILING \
+            --disable CONFIG_STACKPROTECTOR_STRONG
+        
+        # Resposta automática para não travar nas perguntas
+        make olddefconfig
+      working-directory: .
+
+    - name: Compilar Kernel (Turbo)
+      id: buildKernel
+      run: |
+        export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-android-
+        export CLANG_TRIPLE=aarch64-linux-gnu-
+        # Flags O3
+        export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
+        
+        cd kernel_source
+        
+        echo "Iniciando compilação..."
+        make -j$(nproc --all) \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 LLVM_IAS=1
+
+        echo "details=A235M-ULTIMATE-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+      working-directory: .
+
+    - name: Criar VBMeta Disabled
+      run: |
+        wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
+        # Usa python3 explicitamente
+        python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
+      working-directory: .
+
+    - name: Enviar Tudo (Kernel + VBMeta)
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.buildKernel.outputs.details }}
+        path: |
+          kernel_source/arch/arm64/boot/Image
+          vbmeta_disabled.img
