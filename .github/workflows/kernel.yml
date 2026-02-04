@@ -1,4 +1,4 @@
-name: A23_Final_Victory
+name: A23_Final_Rescue_v2
 on:
   workflow_dispatch:
 
@@ -22,9 +22,9 @@ jobs:
       - name: Get Toolchains
         run: |
           mkdir toolchains && cd toolchains
-          # Clang 12 (Estável)
+          # Clang 12 (Obrigatório)
           git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
-          # GCC 4.9 (Essencial para o fix de Assembly)
+          # GCC 4.9 (Obrigatório para o fix de Assembly)
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
 
       - name: Inject KernelSU Next
@@ -45,15 +45,25 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      # === CORREÇÃO CRÍTICA DE ÁUDIO ===
-      # Cria o atalho que faltava para o tas256x.h ser encontrado
-      - name: Fix Audio Driver Path
+      # === AQUI ESTÁ A CORREÇÃO TOTAL (ÁUDIO + CÂMERA) ===
+      - name: Emergency Fixes (Audio & Camera)
         run: |
+          echo "=== Corrigindo Drivers de Áudio ==="
           cd kernel_source/techpack/audio/asoc/codecs/tas256x/os_layer/src
+          # Cria atalho para physical_layer
           ln -sf ../../physical_layer physical_layer
-          echo "Atalho de áudio criado."
+          # Cria atalho para logical_layer (O NOVO ERRO)
+          ln -sf ../../logical_layer logical_layer
+          
+          echo "=== Corrigindo Drivers de Câmera ==="
+          # Vai para a pasta que deu erro
+          cd ../../../../../../../techpack/camera/drivers/cam_utils
+          # Cria um link simbólico trazendo o arquivo perdido para cá
+          ln -sf ../cam_req_mgr/cam_req_mgr_core.h cam_req_mgr_core.h
+          
+          echo "Correções aplicadas com sucesso!"
 
-      - name: Build Kernel (SILENT GAMER MODE)
+      - name: Build Kernel (SILENT GAMER + FIXES)
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
@@ -62,10 +72,9 @@ jobs:
           cd kernel_source
           make clean && make mrproper
           
-          # 1. Carrega a configuração correta
           make vendor/a23_eur_open_defconfig
           
-          # 2. Aplica Performance + Remove Logs (Silent)
+          # === PERFORMANCE MÁXIMA & SEM LOGS ===
           ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
@@ -80,14 +89,11 @@ jobs:
             --disable CONFIG_FTRACE \
             --disable CONFIG_PROFILING \
             --disable CONFIG_AUDIT \
-            --disable CONFIG_AUDITSYSCALL \
-            --disable CONFIG_AUDIT_WATCH \
-            --disable CONFIG_AUDIT_TREE
+            --disable CONFIG_AUDITSYSCALL
             
           make olddefconfig
           
-          echo "=== INICIANDO COMPILAÇÃO (FIXED) ==="
-          # LLVM_IAS=0 para corrigir o erro de criptografia
+          echo "=== COMPILANDO ==="
           export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
           make -j$(nproc --all) \
               CC=clang \
@@ -104,7 +110,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-Gamer-Kernel
+          name: A23-Final-Kernel
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
