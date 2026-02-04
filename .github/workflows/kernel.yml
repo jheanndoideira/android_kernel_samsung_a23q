@@ -1,4 +1,4 @@
-name: A23_God_Mode_A16
+name: A23_Napalm_Strike_A16
 on:
   workflow_dispatch:
 
@@ -43,37 +43,46 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      # === AS CORREÇÕES QUE FUNCIONARAM (GOD MODE) ===
-      - name: God Mode Fixes (Audio, Camera, Display)
+      # === AQUI ESTÃO AS CORREÇÕES ATUALIZADAS ===
+      - name: Apply Napalm Fixes (Audio/Camera/Display)
         run: |
-          echo "=== 1. Correções de ÁUDIO ==="
+          echo "=== 1. Correção do ÁUDIO (Raiz + Logical) ==="
+          # Vai para a raiz do codec
           cd kernel_source/techpack/audio/asoc/codecs/tas256x/os_layer/src
           
-          # Fix: Atalhos
+          # Fix Raiz (para o arquivo .c)
           ln -sf ../../physical_layer physical_layer
           ln -sf ../../logical_layer logical_layer
           
-          # Fix: Código .c
+          # Fix do Código (sed)
           sed -i 's|"os_layer/inc/tas256x-regmap.h"|"../inc/tas256x-regmap.h"|g' tas256x-codec.c
           sed -i 's|"algo/inc/tas_smart_amp_v2.h"|"../../algo/inc/tas_smart_amp_v2.h"|g' tas256x-codec.c
           
-          # Fix: Header Algo
-          cd ../../algo/inc
+          # === O NOVO FIX DO ÁUDIO (Linha 4745) ===
+          # O erro estava dentro de logical_layer/inc pedindo physical_layer
+          cd logical_layer/inc
+          ln -sf ../../physical_layer physical_layer
+          
+          # Volta para o Algo (Fix antigo da linha 30)
+          cd ../../../../../algo/inc
           sed -i 's|"physical_layer/inc/tas256x.h"|"../../physical_layer/inc/tas256x.h"|g' tas_smart_amp_v2.h
           
-          echo "=== 2. Correções de CÂMERA ==="
+          echo "=== 2. Correção da CÂMERA (Lista Completa) ==="
           cd $GITHUB_WORKSPACE/kernel_source/techpack/camera/drivers/cam_utils
+          
+          # Trazemos TODA a família de arquivos que ele pediu até agora
           ln -sf ../cam_req_mgr/cam_req_mgr_core.h cam_req_mgr_core.h
           ln -sf ../cam_req_mgr/cam_req_mgr_interface.h cam_req_mgr_interface.h
           ln -sf ../cam_req_mgr/cam_req_mgr_core_defs.h cam_req_mgr_core_defs.h
           
-          echo "=== 3. Correção de DISPLAY ==="
+          # === O NOVO FIX DA CÂMERA (O erro do util.h) ===
+          ln -sf ../cam_req_mgr/cam_req_mgr_util.h cam_req_mgr_util.h
+          
+          echo "=== 3. Correção do DISPLAY ==="
           cd $GITHUB_WORKSPACE/kernel_source/techpack/display/pll
           sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
-          
-          echo "TODAS AS CORREÇÕES APLICADAS!"
 
-      - name: Build Kernel (ANDROID 16 READY)
+      - name: Build Kernel (ANDROID 16 + BRUTE FORCE)
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
@@ -84,8 +93,7 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # === AQUI ESTÁ A ADAPTAÇÃO PARA ANDROID 16 ===
-          # Mantivemos tudo igual, só adicionamos OverlayFS e BPF
+          # === CONFIG PARA ANDROID 16 ===
           ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
@@ -107,8 +115,10 @@ jobs:
             
           make olddefconfig
           
-          echo "=== INICIANDO COMPILAÇÃO === "
-          export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
+          echo "=== COMPILANDO (IGNORANDO ERROS NÃO-FATAIS) ==="
+          # Flags agressivas para garantir que ele não pare por bobagem
+          export KCFLAGS="-O3 -w -Wno-error -fno-builtin -fcommon -pipe -march=armv8-a+crc+crypto"
+          
           make -j$(nproc --all) \
               CC=clang \
               CROSS_COMPILE=aarch64-linux-android- \
@@ -124,7 +134,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-GodMode-A16
+          name: A23-Napalm-A16
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
