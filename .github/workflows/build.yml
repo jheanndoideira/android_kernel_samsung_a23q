@@ -1,4 +1,4 @@
-name: Build A235M Final (Target Locked)
+name: Build A235M Final (KSU Fixed Place)
 on:
   workflow_dispatch:
 
@@ -19,14 +19,13 @@ jobs:
       run: |
         sudo apt update -y
         sudo apt install bc cpio flex bison git gcc g++ tar perl curl libc++-dev lz4 libssl-dev python2 -y
-        # Resolve erro de sintaxe em scripts antigos da Samsung
         sudo ln -sf /usr/bin/python2 /usr/bin/python
       working-directory: .
 
     - name: Baixar Toolchains (Infalível)
       run: |
         mkdir toolchains && cd toolchains
-        # Clang 12 (crDroid - Estável para kernel 4.19)
+        # Clang 12 (crDroid)
         echo "Baixando Clang 12..."
         git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
         # GCC 4.9 (LineageOS)
@@ -34,15 +33,32 @@ jobs:
         git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
       working-directory: .
 
-    - name: Injetar KernelSU Next
+    - name: Injetar KernelSU Next (Correção de Pasta)
       run: |
         cd kernel_source
-        # Baixa a branch padrão para evitar erros
-        git clone --depth 1 https://github.com/rifsxd/KernelSU-Next drivers/kernelsu
+        echo "=== Baixando KernelSU Next ==="
         
-        # Configura KSU
+        # 1. Clona em uma pasta temporária
+        git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
+        
+        # 2. Move APENAS o conteúdo da pasta 'kernel' para o lugar certo
+        mv temp_ksu/kernel drivers/kernelsu
+        
+        # 3. Apaga o resto para não confundir
+        rm -rf temp_ksu
+        
+        echo "=== Configurando KSU no Makefile ==="
         echo "obj-y += kernelsu/" >> drivers/Makefile
         sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+        
+        # Verificação de segurança
+        if [ -f "drivers/kernelsu/Kconfig" ]; then
+            echo "SUCESSO: Arquivo Kconfig encontrado no lugar certo!"
+        else
+            echo "ERRO: O arquivo drivers/kernelsu/Kconfig ainda não existe."
+            ls -R drivers/kernelsu
+            exit 1
+        fi
       working-directory: .
 
     - name: Injetar SUSFS 1.5.5
@@ -52,16 +68,14 @@ jobs:
         cp susfs4ksu/kernel_patches/include/linux/susfs.h kernel_source/include/linux/
         cd kernel_source
         
-        # Aplica patch (ignora erros leves com || true)
         patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
         
-        # Garante a compilação no Makefile
         if ! grep -q "susfs" fs/Makefile; then 
             echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
         fi
       working-directory: .
 
-    - name: Configurar e Compilar (ALVO ENCONTRADO)
+    - name: Configurar e Compilar (Target: a23_eur_open)
       run: |
         export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
         export ARCH=arm64
@@ -73,11 +87,11 @@ jobs:
         
         make clean && make mrproper
         
-        echo "=== CARREGANDO CONFIGURAÇÃO: a23_eur_open_defconfig ==="
-        # O comando EXATO que faltava
+        echo "=== CARREGANDO CONFIGURAÇÃO ==="
+        # Aqui usamos o nome que descobrimos que funciona
         make vendor/a23_eur_open_defconfig
         
-        echo "=== ATIVANDO PERFORMANCE EXTREMA ==="
+        echo "=== ATIVANDO PERFORMANCE ==="
         ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
@@ -91,10 +105,9 @@ jobs:
             --disable CONFIG_PROFILING \
             --disable CONFIG_STACKPROTECTOR_STRONG
         
-        # Força aceitar as mudanças sem travar
         make olddefconfig
         
-        echo "=== INICIANDO COMPILAÇÃO ==="
+        echo "=== COMPILANDO (Isso vai demorar 20-30 min) ==="
         export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
         make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1
 
