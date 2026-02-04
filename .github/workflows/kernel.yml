@@ -1,4 +1,4 @@
-name: A23_Surgery_Fix
+name: A23_Nuclear_Fix
 on:
   workflow_dispatch:
 
@@ -43,32 +43,36 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      # === AQUI ESTÁ A CIRURGIA (CORREÇÃO DIRETA NO CÓDIGO) ===
-      - name: Surgical Fixes (Audio & Camera)
+      # === AQUI ESTÁ A LISTA COMPLETA DE CIRURGIAS ===
+      - name: Nuclear Fixes (Audio & Camera)
         run: |
-          echo "=== 1. Cirurgia no Áudio (tas256x) ==="
+          echo "=== 1. Entrando na pasta problemática ==="
           cd kernel_source/techpack/audio/asoc/codecs/tas256x/os_layer/src
           
-          # Mantemos os atalhos que já funcionaram antes
+          # Mantém os atalhos básicos
           ln -sf ../../physical_layer physical_layer
           ln -sf ../../logical_layer logical_layer
           
-          # O NOVO FIX: Reescreve a linha bugada dentro do arquivo tas256x-codec.c
-          # Troca "os_layer/inc/tas256x-regmap.h" por "../inc/tas256x-regmap.h"
+          echo "=== 2. Reescrevendo o código do Áudio (Linha por Linha) ==="
+          
+          # Fix Linha 48 (Regmap) - Trocando caminho errado pelo certo
           sed -i 's|"os_layer/inc/tas256x-regmap.h"|"../inc/tas256x-regmap.h"|g' tas256x-codec.c
           
-          echo "=== 2. Fix na Logical Layer (Já testado) ==="
+          # Fix Linha 50 (O NOVO - Algo) - Apontando para 2 pastas acima
+          sed -i 's|"algo/inc/tas_smart_amp_v2.h"|"../../algo/inc/tas_smart_amp_v2.h"|g' tas256x-codec.c
+          
+          echo "=== 3. Fix Preventivo na Camada Lógica ==="
           cd ../../logical_layer/inc
           ln -sf ../../physical_layer physical_layer
           
-          echo "=== 3. Fix na Câmera (Prevenção) ==="
+          echo "=== 4. Fix Preventivo na Câmera ==="
           cd $GITHUB_WORKSPACE/kernel_source/techpack/camera/drivers/cam_utils
           ln -sf ../cam_req_mgr/cam_req_mgr_core.h cam_req_mgr_core.h
           ln -sf ../cam_req_mgr/cam_req_mgr_interface.h cam_req_mgr_interface.h
           
-          echo "Código corrigido na força bruta!"
+          echo "Todas as correções aplicadas!"
 
-      - name: Build Kernel (SILENT & POWERFUL)
+      - name: Build Kernel (SILENT MODE)
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
@@ -79,7 +83,7 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # === PERFORMANCE SETTINGS ===
+          # === CONFIGURAÇÕES ===
           ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
@@ -98,7 +102,7 @@ jobs:
             
           make olddefconfig
           
-          echo "=== INICIANDO COMPILAÇÃO === "
+          echo "=== COMPILANDO === "
           export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
           make -j$(nproc --all) \
               CC=clang \
@@ -115,7 +119,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-Final-Kernel
+          name: A23-Nuclear-Kernel
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
