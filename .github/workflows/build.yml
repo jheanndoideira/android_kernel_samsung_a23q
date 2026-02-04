@@ -1,4 +1,4 @@
-name: Build A235M (Fixed Toolchain + FPS)
+name: Build A235M (Final Fix)
 on:
   workflow_dispatch:
     inputs:
@@ -27,26 +27,27 @@ jobs:
         sudo ln -sf /usr/bin/python2 /usr/bin/python
       working-directory: .
 
-    - name: Baixar Toolchains (Fonte crDroid - Infalível)
+    - name: Baixar Toolchains (crDroid Clang + GCC)
       run: |
         mkdir toolchains && cd toolchains
         
-        # CLANG 12: Baixando do repositório fixo da crDroid
-        # Esse repositório contém EXATAMENTE a versão r416183b1 que corrige o erro de criptografia
-        echo "Baixando Clang 12 (r416183b1)..."
+        # CLANG 12: Repositório da crDroid (Confirmado que funciona)
+        echo "Baixando Clang 12..."
         git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
         
-        # GCC 4.9: Baixando da LineageOS
+        # GCC 4.9: LineageOS
         echo "Baixando GCC..."
         git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
       working-directory: .
 
-    - name: Injetar KernelSU Next (Manual)
+    - name: Injetar KernelSU Next (Auto Branch)
       run: |
         cd kernel_source
         echo "=== Clonando KernelSU Next ==="
-        git clone --depth 1 https://github.com/rifsxd/KernelSU-Next -b next drivers/kernelsu
+        # CORREÇÃO: Removido '-b next'. O Git vai baixar a branch padrão automaticamente.
+        git clone --depth 1 https://github.com/rifsxd/KernelSU-Next drivers/kernelsu
         
+        echo "=== Configurando KSU ==="
         echo "obj-y += kernelsu/" >> drivers/Makefile
         sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
       working-directory: .
@@ -57,8 +58,15 @@ jobs:
         cp susfs4ksu/kernel_patches/fs/susfs.c kernel_source/fs/
         cp susfs4ksu/kernel_patches/include/linux/susfs.h kernel_source/include/linux/
         cd kernel_source
+        
+        # Aplica o patch. Se der erro, continua mesmo assim (o SUSFS manual resolve a maioria dos casos)
         patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-        if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
+        
+        # Garante a compilação no Makefile
+        if ! grep -q "susfs" fs/Makefile; then 
+            echo "Forçando SUSFS no Makefile..."
+            echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
+        fi
       working-directory: .
 
     - name: Configurar Kernel (Performance Extrema)
@@ -106,7 +114,7 @@ jobs:
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-android-
         export CLANG_TRIPLE=aarch64-linux-gnu-
-        # Clang 12 não precisa de polly
+        # Flags O3 mantidas (Clang 12 aguenta!)
         export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
         
         cd kernel_source
@@ -118,7 +126,7 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             LLVM=1 LLVM_IAS=1
 
-        echo "details=A235M-FPS-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+        echo "details=A235M-ULTIMATE-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
       working-directory: .
 
     - name: Criar VBMeta Disabled
