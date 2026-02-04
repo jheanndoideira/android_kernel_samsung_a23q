@@ -1,112 +1,102 @@
-name: Build A235M (Next + SUSFS Combo)
-
+name: Build A235M Ultra - Next + SUSFS
 on:
   workflow_dispatch:
     inputs:
       DEFCONFIG:
-        description: 'Defconfig Name'
+        description: 'Nome do Defconfig'
         default: 'a23q_defconfig'
         required: true
 
 jobs:
   build:
-    name: Build Kernel (Next + SUSFS)
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout Kernel Source
+      uses: actions/checkout@v4
       with:
         repository: potatogeek/kernel-a235m-f
         ref: main
-        path: android_kernel_samsung_a23
+        path: kernel_source
         fetch-depth: 1
 
-    - name: Prepare Environment
+    - name: Instalar Dependências
       run: |
         sudo apt update -y
         sudo apt install bc cpio flex bison git gcc g++ python-is-python3 tar perl curl libc++-dev lz4 libssl-dev -y
 
-    - name: Fetch Toolchain (Clang 18)
+    - name: Baixar Toolchains (Links Oficiais)
       run: |
         mkdir toolchains
         cd toolchains
-        mkdir clang-18 && cd clang-18
-        wget -q https://github.com/ZyCromerZ/Clang/releases/download/18.0.0-20240404-release/Clang-18.0.0-20240404.tar.gz
-        tar -xf Clang-18.0.0-20240404.tar.gz && rm Clang-18.0.0-20240404.tar.gz
+        # Clang Oficial do Google (Android 14/15/16)
+        mkdir clang && cd clang
+        wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522817.tar.gz
+        tar -xf clang-r522817.tar.gz && rm clang-r522817.tar.gz
         cd ..
-        git clone --depth=1 https://gitlab.com/Rissu-Projekt/toolchains/aarch64-linux-android.git google
-      working-directory: android_kernel_samsung_a23
+        # GCC Aarch64 para compatibilidade
+        git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
+      working-directory: kernel_source
 
-    - name: Inject KernelSU Next
+    - name: Injetar KernelSU Next
       run: |
         echo "=== Instalando KernelSU Next ==="
         curl -LSs "https://raw.githubusercontent.com/rifsytn/KernelSU-Next/next/kernel/setup.sh" | bash -s next
-      working-directory: android_kernel_samsung_a23
+      working-directory: kernel_source
 
-    - name: Inject SUSFS (Complex Patch)
+    - name: Injetar SUSFS
       run: |
-        echo "=== Baixando e Aplicando SUSFS ==="
-        # Clona o repo oficial do SUSFS
+        echo "=== Preparando SUSFS 1.5.5 ==="
+        cd ..
         git clone https://gitlab.com/simonpunk/susfs4ksu.git
         
-        # Copia os arquivos do driver SUSFS para a pasta do kernel
-        # Nota: O kernel 4.19 do A23 precisa que o SUSFS fique em fs/susfs ou drivers/su, vamos colocar no padrão
-        cp -r susfs4ksu/kernel_patches/fs/* android_kernel_samsung_a23/fs/
-        cp -r susfs4ksu/kernel_patches/include/linux/* android_kernel_samsung_a23/include/linux/
-
-        cd android_kernel_samsung_a23
+        # Copiando arquivos do driver SUSFS
+        cp susfs4ksu/kernel_patches/fs/susfs.c kernel_source/fs/
+        cp susfs4ksu/kernel_patches/include/linux/susfs.h kernel_source/include/linux/
         
-        # Tenta aplicar o patch para Kernel 4.19
-        # Usamos '|| true' para não cancelar o build se houver erro de espaço em branco, mas avisa no log
-        echo "Aplicando Patch no fs/dcache.c e outros..."
-        patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "⚠️ AVISO: O Patch automático teve conflitos. Verifique se o SUSFS ativa."
-        
-      working-directory: .
+        # Aplicando patches de integração
+        cd kernel_source
+        # O patch 4.19 é o mais compatível com o A23
+        patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || echo "Patch com avisos, mas prosseguindo..."
+      working-directory: kernel_source
 
-    - name: Build Kernel (Turbo + SUSFS)
+    - name: Compilar Kernel (Turbo Mode)
       id: buildKernel
       run: |
-        export PATH=$(pwd)/toolchains/clang-18/bin:$(pwd)/toolchains/google/bin:$PATH
+        # Configuração de Caminhos
+        export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-android-
         export CLANG_TRIPLE=aarch64-linux-gnu-
         
-        # Otimizações
+        # Flags de Performance Máxima
         export CC=clang
         export LLVM=1
         export LLVM_IAS=1
-        export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
-
-        cd android_kernel_samsung_a23
-
-        # Configuração Inicial
+        export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto -mllvm -polly"
+        
+        # Preparar Configuração
         make -C . O=out ${{ github.event.inputs.DEFCONFIG }}
 
-        # === ATIVAÇÃO FORÇADA DAS FLAGS DO SUSFS ===
-        echo "Ativando KernelSU Next + SUSFS no .config..."
-        
-        # KSU Base
+        # Ativar KSU e SUSFS no arquivo de configuração
         echo "CONFIG_KSU=y" >> out/.config
-        
-        # SUSFS Base
         echo "CONFIG_KSU_SUSFS=y" >> out/.config
         echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> out/.config
         echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> out/.config
         echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> out/.config
         echo "CONFIG_KSU_SUSFS_SUS_OVERLAY=y" >> out/.config
-        echo "CONFIG_KSU_SUSFS_TRY_UMIT=y" >> out/.config
-        echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> out/.config
-        
-        # Compilação
+
+        # Compilação Real
         make -j$(nproc --all) -C . O=out \
             CC=clang LLVM=1 LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-android- \
             CLANG_TRIPLE=aarch64-linux-gnu-
 
-        echo "buildDetails=A235M-Next-SUSFS-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
-      working-directory: .
-      
-    - name: Upload Kernel Image
+        # Nomear o arquivo final
+        echo "details=A235M-NEXT-SUSFS-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+      working-directory: kernel_source
+
+    - name: Enviar Kernel (Image)
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ steps.buildKernel.outputs.buildDetails }}
-        path: android_kernel_samsung_a23/out/arch/arm64/boot/Image
+        name: ${{ steps.buildKernel.outputs.details }}
+        path: kernel_source/out/arch/arm64/boot/Image
