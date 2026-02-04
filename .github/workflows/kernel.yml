@@ -1,4 +1,4 @@
-name: A23_Endgame_ScorchedEarth
+name: A23_Total_Victory_A16
 on:
   workflow_dispatch:
 
@@ -43,50 +43,45 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      # === AQUI ESTÁ A MÁGICA "TERRA ARRASADA" ===
-      - name: Apply Endgame Fixes
+      - name: Apply All Fixes (Paths + EOF + Makefiles)
         run: |
           ROOT=$GITHUB_WORKSPACE/kernel_source
           
-          echo "=== 1. ÁUDIO: Conserto Geral (Matando todos os erros de uma vez) ==="
-          cd $ROOT/techpack/audio/asoc/codecs/tas256x/os_layer/src
+          echo "=== 1. Corrigindo 'End of File' (EOF) no Áudio ==="
+          # Adiciona uma linha em branco no final de cada arquivo .c e .h para evitar erros de leitura
+          find $ROOT/techpack/audio/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '$a\' {} \;
+
+          echo "=== 2. ÁUDIO: Master Key (Makefile Injection) ==="
+          AUDIO_DIR="techpack/audio/asoc/codecs/tas256x"
+          cd $ROOT/$AUDIO_DIR
           
-          # Atalhos essenciais
-          ln -sf ../../physical_layer physical_layer
-          ln -sf ../../logical_layer logical_layer
+          # Injeta caminhos de busca para o compilador não se perder
+          echo "ccflags-y += -I\$(src)/os_layer/inc" >> Makefile
+          echo "ccflags-y += -I\$(src)/physical_layer/inc" >> Makefile
+          echo "ccflags-y += -I\$(src)/logical_layer/inc" >> Makefile
+          echo "ccflags-y += -I\$(src)/algo/inc" >> Makefile
           
-          # O COMANDO MÁGICO:
-          # Em vez de consertar só um arquivo, conserta TODOS (*.c) que tenham o caminho errado
-          sed -i 's|"os_layer/inc/|"../inc/|g' *.c
-          sed -i 's|"algo/inc/|"../../algo/inc/|g' *.c
+          # Injeção na subpasta OS Layer (Teimosa)
+          echo "ccflags-y += -I\$(src)/../../physical_layer/inc" >> os_layer/src/Makefile
+          echo "ccflags-y += -I\$(src)/../../logical_layer/inc" >> os_layer/src/Makefile
+          echo "ccflags-y += -I\$(src)/../../algo/inc" >> os_layer/src/Makefile
+
+          echo "=== 3. CÂMERA: GPS Paths & CCI Fix ==="
+          cd $ROOT/techpack/camera/drivers/cam_sensor_module/cam_cci
+          echo "ccflags-y += -I\$(src)" >> Makefile
           
-          echo "=== 2. ÁUDIO: Header Algo ==="
-          cd $ROOT/techpack/audio/asoc/codecs/tas256x/algo/inc
-          sed -i 's|"physical_layer/inc/tas256x.h"|"../../physical_layer/inc/tas256x.h"|g' tas_smart_amp_v2.h
-          
-          echo "=== 3. ÁUDIO: Logical Layer ==="
-          cd $ROOT/techpack/audio/asoc/codecs/tas256x/os_layer/src/logical_layer/inc
-          ln -sf ../../physical_layer physical_layer
-          
-          echo "=== 4. CÂMERA: Utils (Fix Cumulativo) ==="
           cd $ROOT/techpack/camera/drivers/cam_utils
           ln -sf ../cam_req_mgr/cam_req_mgr_core.h cam_req_mgr_core.h
           ln -sf ../cam_req_mgr/cam_req_mgr_interface.h cam_req_mgr_interface.h
           ln -sf ../cam_req_mgr/cam_req_mgr_core_defs.h cam_req_mgr_core_defs.h
           ln -sf ../cam_req_mgr/cam_req_mgr_util.h cam_req_mgr_util.h
           ln -sf ../cam_req_mgr/cam_req_mgr_timer.h cam_req_mgr_timer.h
-          
-          echo "=== 5. CÂMERA: CCI (Fix do Makefile) ==="
-          cd $ROOT/techpack/camera/drivers/cam_sensor_module/cam_cci
-          # Truque: Adiciona a própria pasta na lista de busca do compilador
-          # Isso resolve o erro 'file not found' do cam_cci_dev.h
-          echo "ccflags-y += -I\$(src)" >> Makefile
-          
-          echo "=== 6. DISPLAY: Trace path ==="
+
+          echo "=== 4. DISPLAY: Path Correction ==="
           cd $ROOT/techpack/display/pll
           sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
 
-      - name: Build Kernel (ANDROID 16 + BRUTE FORCE)
+      - name: Build Kernel (ANDROID 16 OPTIMIZED)
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
@@ -97,7 +92,7 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # === CONFIG ANDROID 16 ===
+          # === CONFIGURAÇÃO ANDROID 16 & GAMING ===
           ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
@@ -113,14 +108,13 @@ jobs:
             --disable CONFIG_DEBUG_KERNEL \
             --disable CONFIG_SAMSUNG_DEBUG \
             --disable CONFIG_FTRACE \
-            --disable CONFIG_PROFILING \
-            --disable CONFIG_AUDIT \
-            --disable CONFIG_AUDITSYSCALL
+            --disable CONFIG_PROFILING
             
           make olddefconfig
           
-          echo "=== COMPILANDO (IGNORANDO ERROS CHATOS) ==="
-          export KCFLAGS="-O3 -w -Wno-error -fno-builtin -fcommon -pipe -march=armv8-a+crc+crypto"
+          echo "=== COMPILAÇÃO FINAL (BRUTE FORCE) ==="
+          # KCFLAGS com foco em performance e silenciar avisos inúteis
+          export KCFLAGS="-O3 -w -Wno-everything -fno-builtin -fcommon -pipe -march=armv8-a+crc+crypto"
           
           make -j$(nproc --all) \
               CC=clang \
@@ -137,7 +131,8 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-Endgame-Kernel
+          name: A23-Victory-A16-Kernel
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
+
