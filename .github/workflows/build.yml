@@ -17,7 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        repository: rsuntk/android_kernel_samsung_sm6225
+        repository: potatogeek/kernel-a235m-f
         ref: android-4.19-stable
         path: android_kernel_samsung_a23
         fetch-depth: 1
