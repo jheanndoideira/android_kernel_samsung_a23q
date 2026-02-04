@@ -1,4 +1,4 @@
-name: A23_Sniper_Fix
+name: A23_Final_Pathfinder
 on:
   workflow_dispatch:
 
@@ -43,25 +43,35 @@ jobs:
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
           if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      # === AQUI ESTÁ A MUDANÇA (REESCREVENDO O CÓDIGO) ===
-      - name: Emergency Fixes (Audio & Camera)
+      # === A CORREÇÃO DE NAVEGAÇÃO ESTÁ AQUI ===
+      - name: Emergency Fixes (Pathfinder)
         run: |
-          echo "=== Fase 1: Áudio (tas256x) ==="
-          # Fix 1: O arquivo principal
-          cd kernel_source/techpack/audio/asoc/codecs/tas256x/os_layer/src
+          # Vamos para a raiz do driver de áudio (o "hall de entrada")
+          cd kernel_source/techpack/audio/asoc/codecs/tas256x
+          
+          echo "=== Fix 1: SRC (Onde o arquivo .c mora) ==="
+          # Entramos na pasta do código fonte
+          cd os_layer/src
+          # Trazemos as pastas vizinhas para cá via atalho
+          ln -sf ../../physical_layer physical_layer
+          ln -sf ../../logical_layer logical_layer
+          # Voltamos para o hall
+          cd ../..
+          
+          echo "=== Fix 2: INC (Onde o arquivo .h mora) ==="
+          # Entramos na pasta lógica
+          cd logical_layer/inc
+          # O arquivo aqui dentro precisa da physical_layer, trazemos ela para cá
           ln -sf ../../physical_layer physical_layer
           
-          # Fix 2: O arquivo lógico (ONDE DEU ERRO AGORA)
-          # Em vez de atalho, vamos reescrever a linha de importação para o caminho absoluto relativo
-          cd logical_layer/inc
-          sed -i 's|physical_layer/inc/tas256x.h|../../../../physical_layer/inc/tas256x.h|g' tas256x-logic.h
+          echo "=== Fix 3: Câmera ==="
+          # Voltamos para a raiz ABSOLUTA do projeto para não errar o caminho
+          cd $GITHUB_WORKSPACE/kernel_source
           
-          echo "=== Fase 2: Câmera ==="
-          cd ../../../../../../../../../../
           cd techpack/camera/drivers/cam_utils
           ln -sf ../cam_req_mgr/cam_req_mgr_core.h cam_req_mgr_core.h
           
-          echo "Correções aplicadas via edição direta de código!"
+          echo "Todos os caminhos foram conectados corretamente!"
 
       - name: Build Kernel (FINAL)
         run: |
@@ -74,7 +84,7 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # === PERFORMANCE ===
+          # === PERFORMANCE (SILENT GAMER) ===
           ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
