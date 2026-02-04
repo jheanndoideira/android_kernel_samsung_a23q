@@ -1,11 +1,6 @@
-name: Build A235M Ultimate (Auto-Fix Final)
+name: Build A235M Final (Target Locked)
 on:
   workflow_dispatch:
-    inputs:
-      DICA_CONFIG:
-        description: 'Dica do nome (deixe a23q)'
-        default: 'a23q'
-        required: true
 
 jobs:
   build:
@@ -24,19 +19,17 @@ jobs:
       run: |
         sudo apt update -y
         sudo apt install bc cpio flex bison git gcc g++ tar perl curl libc++-dev lz4 libssl-dev python2 -y
-        # Força o sistema a usar Python 2 para scripts antigos da Samsung
+        # Resolve erro de sintaxe em scripts antigos da Samsung
         sudo ln -sf /usr/bin/python2 /usr/bin/python
       working-directory: .
 
     - name: Baixar Toolchains (Infalível)
       run: |
         mkdir toolchains && cd toolchains
-        
-        # CLANG 12: Repositório da crDroid (Versão r416183b1 exata para kernel 4.19)
+        # Clang 12 (crDroid - Estável para kernel 4.19)
         echo "Baixando Clang 12..."
         git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
-        
-        # GCC 4.9: LineageOS
+        # GCC 4.9 (LineageOS)
         echo "Baixando GCC..."
         git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
       working-directory: .
@@ -44,11 +37,10 @@ jobs:
     - name: Injetar KernelSU Next
       run: |
         cd kernel_source
-        echo "=== Clonando KernelSU Next ==="
-        # Baixa a branch padrão (evita erro de branch not found)
+        # Baixa a branch padrão para evitar erros
         git clone --depth 1 https://github.com/rifsxd/KernelSU-Next drivers/kernelsu
         
-        echo "=== Configurando Drivers ==="
+        # Configura KSU
         echo "obj-y += kernelsu/" >> drivers/Makefile
         sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
       working-directory: .
@@ -60,17 +52,16 @@ jobs:
         cp susfs4ksu/kernel_patches/include/linux/susfs.h kernel_source/include/linux/
         cd kernel_source
         
-        # Aplica patch (ignora erros leves)
+        # Aplica patch (ignora erros leves com || true)
         patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
         
-        # Garante a compilação no Makefile se o patch falhar
+        # Garante a compilação no Makefile
         if ! grep -q "susfs" fs/Makefile; then 
-            echo "Forçando SUSFS no Makefile..."
             echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile
         fi
       working-directory: .
 
-    - name: Configurar Kernel (Busca Inteligente)
+    - name: Configurar e Compilar (ALVO ENCONTRADO)
       run: |
         export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
         export ARCH=arm64
@@ -80,42 +71,13 @@ jobs:
         
         cd kernel_source
         
-        echo "=== LISTA DE ARQUIVOS (DEBUG) ==="
-        # Lista tudo para ajudar se der erro
-        ls -R arch/arm64/configs
-        echo "================================="
-        
-        echo "Procurando arquivo de configuração..."
-        
-        # TENTATIVA 1: Pelo nome que você deu (a23q)
-        TARGET_FILE=$(find arch/arm64/configs -name "*${{ github.event.inputs.DICA_CONFIG }}*defconfig*" | head -n 1)
-        
-        # TENTATIVA 2: Pelo codinome do chipset (bengal)
-        if [ -z "$TARGET_FILE" ]; then
-            echo "Tentativa 1 falhou. Procurando por 'bengal'..."
-            TARGET_FILE=$(find arch/arm64/configs -name "*bengal*defconfig*" | grep -v "debug" | head -n 1)
-        fi
-
-        # TENTATIVA 3: Qualquer defconfig na pasta vendor (Último recurso)
-        if [ -z "$TARGET_FILE" ]; then
-            echo "Tentativa 2 falhou. Pegando o primeiro defconfig encontrado na pasta vendor..."
-            TARGET_FILE=$(find arch/arm64/configs/vendor -name "*defconfig*" | grep -v "debug" | head -n 1)
-        fi
-        
-        # Se falhar tudo
-        if [ -z "$TARGET_FILE" ]; then 
-            echo "ERRO FATAL: Nenhum arquivo de configuração encontrado!"
-            exit 1
-        fi
-        
-        # Remove o caminho inicial para o comando make
-        MAKE_TARGET=${TARGET_FILE#arch/arm64/configs/}
-        echo "=== SUCESSO! Usando: $MAKE_TARGET ==="
-        
         make clean && make mrproper
-        make $MAKE_TARGET
         
-        echo "=== ATIVANDO TURBO MODE & ROOT ==="
+        echo "=== CARREGANDO CONFIGURAÇÃO: a23_eur_open_defconfig ==="
+        # O comando EXATO que faltava
+        make vendor/a23_eur_open_defconfig
+        
+        echo "=== ATIVANDO PERFORMANCE EXTREMA ==="
         ./scripts/config --file .config \
             --enable CONFIG_KSU \
             --enable CONFIG_KSU_SUSFS \
@@ -129,40 +91,23 @@ jobs:
             --disable CONFIG_PROFILING \
             --disable CONFIG_STACKPROTECTOR_STRONG
         
-        # Resposta automática para não travar nas perguntas
+        # Força aceitar as mudanças sem travar
         make olddefconfig
-      working-directory: .
-
-    - name: Compilar Kernel (Turbo)
-      id: buildKernel
-      run: |
-        export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
-        export ARCH=arm64
-        export CROSS_COMPILE=aarch64-linux-android-
-        export CLANG_TRIPLE=aarch64-linux-gnu-
-        # Flags O3
+        
+        echo "=== INICIANDO COMPILAÇÃO ==="
         export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
-        
-        cd kernel_source
-        
-        echo "Iniciando compilação..."
-        make -j$(nproc --all) \
-            CC=clang \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            LLVM=1 LLVM_IAS=1
+        make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1
 
-        echo "details=A235M-ULTIMATE-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+        echo "details=A235M-PERF-$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
       working-directory: .
 
     - name: Criar VBMeta Disabled
       run: |
         wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
-        # Usa python3 explicitamente
         python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
       working-directory: .
 
-    - name: Enviar Tudo (Kernel + VBMeta)
+    - name: Enviar Tudo
       uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.buildKernel.outputs.details }}
