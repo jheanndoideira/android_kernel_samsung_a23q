@@ -1,4 +1,4 @@
-name: Build A235M Final (Clang 12 Git + Fixes)
+name: Build A235M (Fixed Toolchain + FPS)
 on:
   workflow_dispatch:
     inputs:
@@ -27,13 +27,14 @@ jobs:
         sudo ln -sf /usr/bin/python2 /usr/bin/python
       working-directory: .
 
-    - name: Baixar Toolchains (Método Seguro)
+    - name: Baixar Toolchains (Fonte crDroid - Infalível)
       run: |
         mkdir toolchains && cd toolchains
         
-        # CLANG 12: Baixando via GIT do repositório ZyCromerZ (Mais estável que o link da Google)
-        echo "Baixando Clang 12..."
-        git clone --depth=1 https://github.com/ZyCromerZ/Clang -b 12.0 clang
+        # CLANG 12: Baixando do repositório fixo da crDroid
+        # Esse repositório contém EXATAMENTE a versão r416183b1 que corrige o erro de criptografia
+        echo "Baixando Clang 12 (r416183b1)..."
+        git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
         
         # GCC 4.9: Baixando da LineageOS
         echo "Baixando GCC..."
@@ -105,7 +106,7 @@ jobs:
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-android-
         export CLANG_TRIPLE=aarch64-linux-gnu-
-        # Clang 12 não precisa de polly, e removemos para evitar erros
+        # Clang 12 não precisa de polly
         export KCFLAGS="-O3 -pipe -march=armv8-a+crc+crypto"
         
         cd kernel_source
