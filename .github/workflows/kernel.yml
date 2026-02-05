@@ -1,4 +1,4 @@
-name: A23_SUPER_ELITE_FINAL
+name: A23_OMEGA_SUPREME_A16
 on:
   workflow_dispatch:
 
@@ -24,7 +24,7 @@ jobs:
       - name: Inject Root & Performance DNA
         run: |
           cd kernel_source
-          # KernelSU Next & SUSFS (Root Invisível)
+          # KernelSU Next & SUSFS
           git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
           mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
           echo "obj-y += kernelsu/" >> drivers/Makefile
@@ -35,7 +35,7 @@ jobs:
 
       - name: The Surgeon Fix (Audio/Camera/Display)
         run: |
-          # Limpeza de caminhos do Techpack
+          # Correção definitiva do Techpack
           cd kernel_source/techpack/audio/asoc/codecs/tas256x
           find . -type f -name "*.[ch]" -exec sed -i 's|physical_layer/inc/||g' {} +
           find . -type f -name "*.[ch]" -exec sed -i 's|logical_layer/inc/||g' {} +
@@ -43,7 +43,7 @@ jobs:
           cd ../../../../display/pll
           sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
 
-      - name: Elite Build (Performance & Android 16)
+      - name: Build OMEGA (Ultimate Performance)
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
@@ -52,30 +52,29 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # === TUNING DE PERFORMANCE E REDE ===
+          # === PERFORMANCE & REDE ===
           ./scripts/config --enable CONFIG_LTO_CLANG_FULL
           ./scripts/config --enable CONFIG_HZ_300
           ./scripts/config --enable CONFIG_TCP_CONG_BBR
           ./scripts/config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
-          ./scripts/config --enable CONFIG_ZRAM
-          ./scripts/config --enable CONFIG_ZSMALLOC
-          ./scripts/config --enable CONFIG_ZRAM_WRITEBACK
           
-          # === ANDROID 16 & ROOT ===
-          ./scripts/config --enable CONFIG_OVERLAY_FS
-          ./scripts/config --enable CONFIG_BPF_SYSCALL
+          # === ROOT & ANDROID 16 (OS DETALHES QUE FALTAVAM) ===
           ./scripts/config --enable CONFIG_KSU
           ./scripts/config --enable CONFIG_KSU_SUSFS
-          ./scripts/config --enable CONFIG_IP_NF_TARGET_TTL
-          ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
+          ./scripts/config --enable CONFIG_KPROBES
+          ./scripts/config --enable CONFIG_KALLSYMS_ALL
+          ./scripts/config --enable CONFIG_OVERLAY_FS
+          ./scripts/config --enable CONFIG_BPF_SYSCALL
+          ./scripts/config --enable CONFIG_MODULES
           
-          # === LIMPEZA DE LOGS (MAIS VELOCIDADE) ===
-          ./scripts/config --disable CONFIG_DEBUG_MISC
+          # === LIMPEZA DE SEGURANÇA (PARA PERFORMANCE) ===
+          ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
+          ./scripts/config --disable CONFIG_DEBUG_KERNEL
           ./scripts/config --disable CONFIG_SAMSUNG_DEBUG_LOG
           
           yes "" | make olddefconfig
           
-          # Flags de Compilação de Elite
+          # Flags "Extreme" de Compilação
           ADR="techpack/audio/asoc/codecs/tas256x"
           export KCFLAGS="-O3 -Ofast -w -pipe -march=armv8-a+crc+crypto -fno-builtin -fcommon -I$(pwd)/$ADR/physical_layer/inc -I$(pwd)/$ADR/logical_layer/inc"
           
@@ -88,11 +87,11 @@ jobs:
 
       - name: Create Artifacts
         run: |
-          wget https://raw.githubusercontent.com/external-avb/avb-master/avbtool.py || wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
+          wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py || curl -LO https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
       - uses: actions/upload-artifact@v4
         with:
-          name: A23-SUPER-ELITE-KERNEL
+          name: A23-OMEGA-SUPREME
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
