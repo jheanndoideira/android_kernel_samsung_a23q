@@ -1,4 +1,4 @@
-name: A23_Variant_B_Surgeon
+name: A23_Variant_C_Forest
 on:
   workflow_dispatch:
 
@@ -18,9 +18,6 @@ jobs:
           sudo apt update -y
           sudo apt install bc cpio flex bison git gcc g++ tar perl curl libc++-dev lz4 libssl-dev python2 -y
           sudo ln -sf /usr/bin/python2 /usr/bin/python
-
-      - name: Get Toolchains
-        run: |
           mkdir toolchains && cd toolchains
           git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
@@ -36,16 +33,29 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-      - name: Code Surgery (The Surgeon)
+      - name: Create Symlink Forest
         run: |
-          cd kernel_source/techpack
-          echo "=== Removendo caminhos relativos de todos os headers de Áudio e Câmera ==="
-          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|physical_layer/inc/||g' {} +
-          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|logical_layer/inc/||g' {} +
-          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|algo/inc/||g' {} +
-          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|os_layer/inc/||g' {} +
+          ROOT=$(pwd)/kernel_source
+          AUDIO_ROOT=$ROOT/techpack/audio/asoc/codecs/tas256x
+          
+          echo "=== Plantando a Floresta de Atalhos ==="
+          
+          # Encontra TODAS as subpastas dentro do diretório do driver tas256x
+          # E cria links para as camadas físicas/lógicas dentro de CADA UMA delas.
+          find $AUDIO_ROOT -type d | while read dir; do
+            ln -sf $AUDIO_ROOT/physical_layer/inc $dir/physical_layer 2>/dev/null || true
+            ln -sf $AUDIO_ROOT/logical_layer/inc $dir/logical_layer 2>/dev/null || true
+            ln -sf $AUDIO_ROOT/algo/inc $dir/algo 2>/dev/null || true
+            ln -sf $AUDIO_ROOT/os_layer/inc $dir/os_layer 2>/dev/null || true
+          done
+          
+          # Fix Câmera (Mesma lógica: espalhar os headers)
+          CAM_ROOT=$ROOT/techpack/camera/drivers/cam_utils
+          find $ROOT/techpack/camera -type d | while read dir; do
+             ln -sf $CAM_ROOT/*.h $dir/ 2>/dev/null || true
+          done
 
-      - name: Build with Surgeon Method
+      - name: Build with Forest Method
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
@@ -62,21 +72,16 @@ jobs:
           
           yes "" | make olddefconfig
           
-          # Define apenas as raízes das pastas para o Surgeon buscar
-          ADR="techpack/audio/asoc/codecs/tas256x"
-          export KCFLAGS="-O3 -w -I$(pwd)/$ADR/physical_layer/inc -I$(pwd)/$ADR/logical_layer/inc -I$(pwd)/$ADR/algo/inc -I$(pwd)/$ADR/os_layer/inc"
-          
-          make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=0
+          # Compila sem precisar de flags extras, pois os arquivos já estão "localmente" em cada pasta
+          make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- LLVM=1 LLVM_IAS=0 KCFLAGS="-O3 -w"
 
-      - name: Create VBMeta
+      - name: Create VBMeta & Upload
         run: |
           wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: A23-Surgeon-Kernel
+          name: A23-Forest-Kernel
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
