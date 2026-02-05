@@ -1,4 +1,4 @@
-name: A23_Alpha_Prime_LIDER
+name: A23_Variant_F_HeaderHammer
 on:
   workflow_dispatch:
 
@@ -6,93 +6,37 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout Source
+      - name: Checkout & Tools
         uses: actions/checkout@v4
         with:
           repository: potatogeek/kernel-a235m-f
-          ref: main
           path: kernel_source
-
-      - name: Setup Environment
+      - name: Setup
         run: |
-          sudo apt update -y
-          sudo apt install bc cpio flex bison git gcc g++ tar perl curl libc++-dev lz4 libssl-dev python2 -y
+          sudo apt update && sudo apt install bc cpio flex bison git gcc g++ python2 -y
           sudo ln -sf /usr/bin/python2 /usr/bin/python
           mkdir toolchains && cd toolchains
           git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
 
-      - name: Inject KernelSU Next & SUSFS
-        run: |
-          cd kernel_source
-          git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
-          mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
-          echo "obj-y += kernelsu/" >> drivers/Makefile
-          sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-
-      - name: Pre-Configuration (LTO & Android 16)
-        run: |
-          cd kernel_source
-          CONF="arch/arm64/configs/vendor/a23_eur_open_defconfig"
-          # Injeta as opções diretamente no arquivo para evitar o erro de "End of File"
-          sed -i '$a CONFIG_LTO_CLANG_FULL=y' $CONF
-          sed -i '$a CONFIG_OVERLAY_FS=y' $CONF
-          sed -i '$a CONFIG_BPF_SYSCALL=y' $CONF
-          sed -i '$a CONFIG_KSU=y' $CONF
-          sed -i '$a CONFIG_KSU_SUSFS=y' $CONF
-          sed -i '$a CONFIG_IP_NF_TARGET_TTL=y' $CONF
-          sed -i '$a CONFIG_JUMP_LABEL=y' $CONF
-          sed -i '$a # CONFIG_SHADOW_CALL_STACK is not set' $CONF
-
-      - name: Absolute Path Reconstruction (Audio/Camera/Display)
+      - name: Create Header Hammer
         run: |
           ROOT=$(pwd)/kernel_source
-          # Resolve Display
-          cd $ROOT/techpack/display/pll
-          sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
-          
-          # Resolve Audio (Cópia Direta para evitar erro de Link simbólico)
-          ADR="$ROOT/techpack/audio/asoc/codecs/tas256x"
-          mkdir -p $ADR/os_layer/src/physical_layer/inc
-          mkdir -p $ADR/os_layer/src/logical_layer/inc
-          mkdir -p $ADR/os_layer/src/algo/inc
-          cp $ADR/physical_layer/inc/*.h $ADR/os_layer/src/physical_layer/inc/ 2>/dev/null || true
-          cp $ADR/logical_layer/inc/*.h $ADR/os_layer/src/logical_layer/inc/ 2>/dev/null || true
-          cp $ADR/algo/inc/*.h $ADR/os_layer/src/algo/inc/ 2>/dev/null || true
+          mkdir -p $ROOT/fixed_headers
+          # Procura todos os arquivos .h no techpack e coloca na super pasta
+          find $ROOT/techpack -name "*.h" -exec cp {} $ROOT/fixed_headers/ \;
+          # Resolve o problema da estrutura de pastas fake
+          mkdir -p $ROOT/fixed_headers/physical_layer/inc
+          cp $ROOT/fixed_headers/*.h $ROOT/fixed_headers/physical_layer/inc/
 
-      - name: Build Alpha Prime
+      - name: Build with Hammer
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-android-
-          export CLANG_TRIPLE=aarch64-linux-gnu-
           cd kernel_source
-          
-          make clean && make mrproper
           make vendor/a23_eur_open_defconfig
-          
-          # Força o LTO nas escolhas interativas residuais
-          printf "2\nn\ny\n" | make olddefconfig
-          
-          # Injeção Global de Headers no KCFLAGS
-          ADR_INC="techpack/audio/asoc/codecs/tas256x"
-          CAM_INC="techpack/camera/drivers"
-          export KCFLAGS="-O3 -w -I$(pwd)/$ADR_INC/physical_layer/inc -I$(pwd)/$ADR_INC/logical_layer/inc -I$(pwd)/$ADR_INC/algo/inc -I$(pwd)/$CAM_INC/cam_sensor_module/cam_cci"
-          
-          make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=0
-
-      - name: Create VBMeta
-        run: |
-          wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
-          python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: A23-Alpha-Prime-Image
-          path: |
-            kernel_source/arch/arm64/boot/Image
-            vbmeta_disabled.img
+          ./scripts/config --enable CONFIG_LTO_CLANG_FULL
+          ./scripts/config --enable CONFIG_OVERLAY_FS
+          yes "" | make olddefconfig
+          # Aponta o compilador para a super pasta de headers
+          export KCFLAGS="-O3 -w -I$(pwd)/fixed_headers"
+          make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- LLVM=1
