@@ -1,4 +1,4 @@
-name: A23_ULTIMATE_OMEGA_V3
+name: A23_FORTRESS_OMEGA_V5
 on:
   workflow_dispatch:
 
@@ -21,29 +21,38 @@ jobs:
           git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
 
-      - name: Inject Root & Performance DNA
+      - name: Inject Root & FIX KernelSU (Compatibility Fix)
         run: |
           cd kernel_source
-          # KernelSU Next & SUSFS
           git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
           mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
+          
+          # CORREÇÃO DE SEGURANÇA: No Kernel 4.19, task_work_add usa um booleano (true/1) 
+          # em vez do enum TWA_RESUME. Isso mantém a funcionalidade original de segurança.
+          sed -i 's/TWA_RESUME/1/g' drivers/kernelsu/allowlist.c
+          
           echo "obj-y += kernelsu/" >> drivers/Makefile
           sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          
+          # SUSFS (Stealth Security)
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-      - name: The Surgeon Fix (Audio/Camera/Display)
+      - name: Header Mapping (Audio/Camera/Display)
         run: |
-          # Correção definitiva do Techpack (O erro que nos perseguia)
-          cd kernel_source/techpack/audio/asoc/codecs/tas256x
-          find . -type f -name "*.[ch]" -exec sed -i 's|physical_layer/inc/||g' {} +
-          find . -type f -name "*.[ch]" -exec sed -i 's|logical_layer/inc/||g' {} +
-          find . -name "*.h" -exec cp {} ./os_layer/src/ \; 2>/dev/null || true
-          cd ../../../../display/pll
+          ROOT=$(pwd)/kernel_source
+          # Resolve caminhos sem mover arquivos (mais estável)
+          ADR="$ROOT/techpack/audio/asoc/codecs/tas256x"
+          mkdir -p $ADR/os_layer/inc
+          cp $ADR/physical_layer/inc/*.h $ADR/os_layer/inc/ 2>/dev/null || true
+          cp $ADR/logical_layer/inc/*.h $ADR/os_layer/inc/ 2>/dev/null || true
+          
+          # Fix Display Trace Path
+          cd $ROOT/techpack/display/pll
           sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
 
-      - name: Build OMEGA (Final Version)
+      - name: Build Fortress (Security & Performance)
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
@@ -52,31 +61,31 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # === PERFORMANCE E REDE ===
+          # === BLOCO DE SEGURANÇA HARDENED ===
+          ./scripts/config --enable CONFIG_STACKPROTECTOR_STRONG
+          ./scripts/config --enable CONFIG_REFCOUNT_FULL
+          ./scripts/config --enable CONFIG_PANIC_ON_REFCOUNT_ERROR
+          ./scripts/config --enable CONFIG_HARDENED_USERCOPY
+          ./scripts/config --enable CONFIG_FORTIFY_SOURCE
+          ./scripts/config --enable CONFIG_STRICT_KERNEL_RWX
+          
+          # === PERFORMANCE & ROOT ===
           ./scripts/config --enable CONFIG_LTO_CLANG_FULL
           ./scripts/config --enable CONFIG_HZ_300
-          ./scripts/config --enable CONFIG_TCP_CONG_BBR
-          ./scripts/config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
-          
-          # === ROOT & ANDROID 16 (ESSENCIAIS) ===
           ./scripts/config --enable CONFIG_KSU
           ./scripts/config --enable CONFIG_KSU_SUSFS
-          ./scripts/config --enable CONFIG_KPROBES
-          ./scripts/config --enable CONFIG_KALLSYMS_ALL
           ./scripts/config --enable CONFIG_OVERLAY_FS
           ./scripts/config --enable CONFIG_BPF_SYSCALL
-          ./scripts/config --enable CONFIG_MODULES
           
-          # === DESATIVAR BLOQUEIOS DE SEGURANÇA ===
-          ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
-          ./scripts/config --disable CONFIG_DEBUG_KERNEL
-          ./scripts/config --disable CONFIG_SAMSUNG_DEBUG_LOG
+          # Resposta automática para o menu (Shadow Call Stack e outras novidades)
+          # Respondemos 'y' para Shadow Call Stack se o compilador oferecer, por segurança.
+          printf "y\ny\ny\ny\ny\ny\n" | make olddefconfig || yes "" | make olddefconfig
           
-          yes "" | make olddefconfig
+          # Radar de Headers (Inclusão Absoluta)
+          AUDIO_INC="-I$(pwd)/techpack/audio/asoc/codecs/tas256x/physical_layer/inc -I$(pwd)/techpack/audio/asoc/codecs/tas256x/os_layer/inc"
+          CAM_INC="-I$(pwd)/techpack/camera/drivers/cam_req_mgr -I$(pwd)/techpack/camera/drivers/cam_utils"
           
-          # Flags "Extreme" - Otimização total para o chip do A23
-          ADR="techpack/audio/asoc/codecs/tas256x"
-          export KCFLAGS="-O3 -Ofast -w -pipe -march=armv8-a+crc+crypto -fno-builtin -fcommon -I$(pwd)/$ADR/physical_layer/inc -I$(pwd)/$ADR/logical_layer/inc"
+          export KCFLAGS="-O3 -Ofast -w -pipe -march=armv8-a+crc+crypto -fno-builtin -fcommon $AUDIO_INC $CAM_INC"
           
           make -j$(nproc --all) \
               CC=clang \
@@ -91,7 +100,7 @@ jobs:
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
       - uses: actions/upload-artifact@v4
         with:
-          name: A23-OMEGA-SUPREME-FINAL
+          name: A23-FORTRESS-KERNEL
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
