@@ -1,4 +1,4 @@
-name: A23_Variant_F_HeaderHammer
+name: A23_Alpha_LIDER_Omega
 on:
   workflow_dispatch:
 
@@ -22,19 +22,39 @@ jobs:
           git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
 
-      - name: Create Header Hammer
+      - name: Inject KSU & SUSFS
+        run: |
+          cd kernel_source
+          git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
+          mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
+          echo "obj-y += kernelsu/" >> drivers/Makefile
+          sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
+          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+
+      - name: The Audio Bridge (Fixing tas256x-logic.h)
         run: |
           ROOT=$(pwd)/kernel_source
-          mkdir -p $ROOT/fixed_headers
-          # Copia todos os .h do techpack para uma pasta central
-          find $ROOT/techpack -name "*.h" -exec cp {} $ROOT/fixed_headers/ \;
-          # Cria a estrutura fake que o áudio pede
-          mkdir -p $ROOT/fixed_headers/physical_layer/inc
-          cp $ROOT/fixed_headers/*.h $ROOT/fixed_headers/physical_layer/inc/
+          ADR="$ROOT/techpack/audio/asoc/codecs/tas256x"
+          
+          # Esta é a pasta onde o erro aconteceu:
+          LOGIC_DIR="$ADR/os_layer/src/logical_layer/inc"
+          
+          # Criamos a ponte física para o arquivo ser encontrado:
+          mkdir -p $LOGIC_DIR/physical_layer/inc
+          cp $ADR/physical_layer/inc/tas256x.h $LOGIC_DIR/physical_layer/inc/
+          
+          # Fix extra para o outro arquivo de áudio:
+          mkdir -p $ADR/os_layer/src/physical_layer/inc
+          cp $ADR/physical_layer/inc/tas256x.h $ADR/os_layer/src/physical_layer/inc/
+          
+          # Fix Display Trace
+          cd $ROOT/techpack/display/pll
+          sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
 
-      - name: Build with Hammer
+      - name: Build Alpha Omega
         run: |
-          # DEFINE AS VARIÁVEIS LÍDERES (O QUE FALTOU ANTES)
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
           export CLANG_TRIPLE=aarch64-linux-gnu-
@@ -42,30 +62,37 @@ jobs:
           
           cd kernel_source
           make clean && make mrproper
-          
-          # AGORA ELE VAI ACHAR A PASTA CERTA
           make vendor/a23_eur_open_defconfig
           
-          ./scripts/config --enable CONFIG_LTO_CLANG_FULL
-          ./scripts/config --enable CONFIG_OVERLAY_FS
-          ./scripts/config --enable CONFIG_BPF_SYSCALL
+          # CONFIGURAÇÃO "MURO DE FERRO" (Força o LTO e Android 16 sem perguntas)
+          ./scripts/config --file .config --enable CONFIG_LTO_CLANG_FULL
+          ./scripts/config --file .config --disable CONFIG_LTO_NONE
+          ./scripts/config --file .config --disable CONFIG_SHADOW_CALL_STACK
+          ./scripts/config --file .config --enable CONFIG_OVERLAY_FS
+          ./scripts/config --file .config --enable CONFIG_BPF_SYSCALL
+          ./scripts/config --file .config --enable CONFIG_KSU
           
+          # O "yes" definitivo para qualquer pergunta surpresa:
           yes "" | make olddefconfig
           
-          # Aponta para a pasta central de headers
-          export KCFLAGS="-O3 -w -I$(pwd)/../fixed_headers"
+          echo "=== INICIANDO COMPILAÇÃO FINAL ==="
+          # Injetamos o caminho base do techpack para garantir
+          export KCFLAGS="-O3 -w -fno-builtin -fcommon -I$(pwd)/techpack/audio/asoc/codecs/tas256x/physical_layer/inc"
           
-          make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=0
+          make -j$(nproc --all) \
+              CC=clang \
+              CROSS_COMPILE=aarch64-linux-android- \
+              CLANG_TRIPLE=aarch64-linux-gnu- \
+              LLVM=1 \
+              LLVM_IAS=0
 
-      - name: Create VBMeta
+      - name: Create VBMeta & Upload
         run: |
           wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: A23-HeaderHammer-Kernel
+          name: A23-Alpha-Omega-Kernel
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
