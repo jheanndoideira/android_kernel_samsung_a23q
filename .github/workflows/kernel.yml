@@ -1,4 +1,4 @@
-name: A23_FORTRESS_OMEGA_V5
+name: A23_V18_THE_UNTOUCHABLE_FINAL
 on:
   workflow_dispatch:
 
@@ -15,92 +15,115 @@ jobs:
       - name: Setup Environment
         run: |
           sudo apt update -y
-          sudo apt install bc cpio flex bison git gcc g++ tar perl curl libc++-dev lz4 libssl-dev python2 -y
+          sudo apt install bc cpio flex bison git gcc g++ tar perl curl libc++-dev lz4 libssl-dev python3 python2 -y
           sudo ln -sf /usr/bin/python2 /usr/bin/python
           mkdir toolchains && cd toolchains
           git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
 
-      - name: Inject Root & FIX KernelSU (Compatibility Fix)
+      - name: Inject Root, WireGuard & Fixes
         run: |
           cd kernel_source
+          # KernelSU Next + TWA_RESUME Fix (Fundamental para Kernel 4.19)
           git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
           mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
-          
-          # CORREÇÃO DE SEGURANÇA: No Kernel 4.19, task_work_add usa um booleano (true/1) 
-          # em vez do enum TWA_RESUME. Isso mantém a funcionalidade original de segurança.
           sed -i 's/TWA_RESUME/1/g' drivers/kernelsu/allowlist.c
-          
           echo "obj-y += kernelsu/" >> drivers/Makefile
           sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          
-          # SUSFS (Stealth Security)
+          # SUSFS & WireGuard
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+          git clone --depth 1 https://github.com/WireGuard/wireguard-linux-compat.git
+          cp -R wireguard-linux-compat/src drivers/net/wireguard
+          echo "obj-y += wireguard/" >> drivers/net/Makefile
 
-      - name: Header Mapping (Audio/Camera/Display)
+      - name: Surgeon Fix V18 (The Final Repair)
         run: |
           ROOT=$(pwd)/kernel_source
-          # Resolve caminhos sem mover arquivos (mais estável)
           ADR="$ROOT/techpack/audio/asoc/codecs/tas256x"
-          mkdir -p $ADR/os_layer/inc
-          cp $ADR/physical_layer/inc/*.h $ADR/os_layer/inc/ 2>/dev/null || true
-          cp $ADR/logical_layer/inc/*.h $ADR/os_layer/inc/ 2>/dev/null || true
-          
-          # Fix Display Trace Path
-          cd $ROOT/techpack/display/pll
-          sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
+          # Mapeamento físico de pastas para enganar o compilador
+          mkdir -p $ADR/os_layer/src/os_layer/inc
+          cp $ADR/os_layer/inc/*.h $ADR/os_layer/src/os_layer/inc/ 2>/dev/null || true
+          cp $ADR/physical_layer/inc/*.h $ADR/os_layer/src/os_layer/inc/ 2>/dev/null || true
+          # Fix Camera Trace
+          CAM="$ROOT/techpack/camera/drivers/cam_req_mgr"
+          mkdir -p $ROOT/techpack/camera/drivers/cam_utils
+          cp $CAM/*.h $ROOT/techpack/camera/drivers/cam_utils/ 2>/dev/null || true
+          # Desativar travas Samsung RKP direto no código
+          find $ROOT -name "Kconfig*" -exec sed -i 's/bool "Samsung RKP"/bool/g' {} +
 
-      - name: Build Fortress (Security & Performance)
+      - name: Build Untouchable (Tudo Incluso)
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           cd kernel_source
-          
           make vendor/a23_eur_open_defconfig
           
-          # === BLOCO DE SEGURANÇA HARDENED ===
-          ./scripts/config --enable CONFIG_STACKPROTECTOR_STRONG
-          ./scripts/config --enable CONFIG_REFCOUNT_FULL
-          ./scripts/config --enable CONFIG_PANIC_ON_REFCOUNT_ERROR
-          ./scripts/config --enable CONFIG_HARDENED_USERCOPY
-          ./scripts/config --enable CONFIG_FORTIFY_SOURCE
-          ./scripts/config --enable CONFIG_STRICT_KERNEL_RWX
-          
-          # === PERFORMANCE & ROOT ===
+          # === O MOTOR DE PERFORMANCE (LTO + POLLY) ===
           ./scripts/config --enable CONFIG_LTO_CLANG_FULL
+          ./scripts/config --enable CONFIG_LLVM_POLLY
           ./scripts/config --enable CONFIG_HZ_300
+          ./scripts/config --enable CONFIG_PREEMPT
+          ./scripts/config --enable CONFIG_TCP_CONG_BBR
+          ./scripts/config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
+          
+          # === FLUIDEZ, DISCO E VPN ===
+          ./scripts/config --enable CONFIG_IOSCHED_MAPLE
+          ./scripts/config --set-str CONFIG_DEFAULT_IOSCHED "maple"
+          ./scripts/config --enable CONFIG_DYNAMIC_FSYNC
+          ./scripts/config --enable CONFIG_WIREGUARD
+          
+          # === MEMÓRIA E ANDROID 16 ===
+          ./scripts/config --enable CONFIG_ZRAM_DEF_COMP_ZSTD
+          ./scripts/config --enable CONFIG_ZSMALLOC
+          ./scripts/config --enable CONFIG_PSI
+          ./scripts/config --enable CONFIG_BPF_JIT
+          
+          # === SEGURANÇA E COMPATIBILIDADE DE DRIVERS ===
           ./scripts/config --enable CONFIG_KSU
           ./scripts/config --enable CONFIG_KSU_SUSFS
-          ./scripts/config --enable CONFIG_OVERLAY_FS
-          ./scripts/config --enable CONFIG_BPF_SYSCALL
+          ./scripts/config --enable CONFIG_KPROBES
+          ./scripts/config --enable CONFIG_KALLSYMS_ALL
+          ./scripts/config --enable CONFIG_MODULES
+          ./scripts/config --disable CONFIG_MODULE_SIG_FORCE
+          ./scripts/config --disable CONFIG_RKP_KDP
+          ./scripts/config --disable CONFIG_TIMA
+          ./scripts/config --disable CONFIG_SEC_RESTRICT_ROOTING
           
-          # Resposta automática para o menu (Shadow Call Stack e outras novidades)
-          # Respondemos 'y' para Shadow Call Stack se o compilador oferecer, por segurança.
-          printf "y\ny\ny\ny\ny\ny\n" | make olddefconfig || yes "" | make olddefconfig
+          make olddefconfig
           
-          # Radar de Headers (Inclusão Absoluta)
+          # KCFLAGS - Headers incluídos explicitamente
           AUDIO_INC="-I$(pwd)/techpack/audio/asoc/codecs/tas256x/physical_layer/inc -I$(pwd)/techpack/audio/asoc/codecs/tas256x/os_layer/inc"
-          CAM_INC="-I$(pwd)/techpack/camera/drivers/cam_req_mgr -I$(pwd)/techpack/camera/drivers/cam_utils"
+          CAM_INC="-I$(pwd)/techpack/camera/drivers/cam_req_mgr"
+          export KCFLAGS="-O3 -Ofast -w -pipe -march=armv8-a+crc+crypto -mllvm -polly -fno-builtin -fcommon $AUDIO_INC $CAM_INC"
           
-          export KCFLAGS="-O3 -Ofast -w -pipe -march=armv8-a+crc+crypto -fno-builtin -fcommon $AUDIO_INC $CAM_INC"
-          
+          # Compilação Final com LLD
           make -j$(nproc --all) \
-              CC=clang \
-              CROSS_COMPILE=aarch64-linux-android- \
-              CLANG_TRIPLE=aarch64-linux-gnu- \
-              LLVM=1 \
-              LLVM_IAS=0
+              CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
+              LLVM=1 LLVM_IAS=0 \
+              dtbo.img Image.gz-dtb
 
-      - name: Create Artifacts
+      - name: Final Package (AnyKernel3)
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+          # Garante que o instalador ache a partição boot do A23
+          sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.1/by-name/boot;|block=/dev/block/by-name/boot;|g' AnyKernel3/anykernel.sh
+          cp kernel_source/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
+          cp kernel_source/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
+          cd AnyKernel3 && zip -r9 ../A23-UNTOUCHABLE-V18.zip *
+
+      - name: Create VBMeta
         run: |
           curl -LO https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
-      - uses: actions/upload-artifact@v4
+
+      - name: Final Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: A23-FORTRESS-KERNEL
+          name: A23-V18-UNTOUCHABLE
           path: |
-            kernel_source/arch/arm64/boot/Image
+            A23-UNTOUCHABLE-V18.zip
             vbmeta_disabled.img
