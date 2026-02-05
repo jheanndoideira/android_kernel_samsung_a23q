@@ -1,4 +1,4 @@
-name: A23_V35_SILENCE
+name: A23_V36_COLLECTOR
 on:
   workflow_dispatch:
 
@@ -54,7 +54,7 @@ jobs:
           sed -i 's/print "error, forbidden warning:", m.group(2)/print("error, forbidden warning:", m.group(2))/g' scripts/gcc-wrapper.py
           sed -i 's/print "warning, allowed warning:", m.group(2)/print("warning, allowed warning:", m.group(2))/g' scripts/gcc-wrapper.py
           
-          # Fix Audio Headers
+          # Fix Audio Headers (TODOS ELES)
           cp -r techpack/audio/asoc/codecs/tas256x/physical_layer/inc/*.h include/linux/ 2>/dev/null || true
           cp -r techpack/audio/asoc/codecs/tas256x/logical_layer/inc/*.h include/linux/ 2>/dev/null || true
 
@@ -93,7 +93,7 @@ jobs:
           
           yes "" | make O=out ARCH=arm64 olddefconfig
 
-      - name: "7. Compile (TOOLS ALIGNED)"
+      - name: "7. Compile EVERYTHING (Ignore Errors)"
         run: |
           TP_PLL="-I$(pwd)/techpack/display/pll"
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
@@ -101,10 +101,11 @@ jobs:
           
           export KCFLAGS="-O3 -Ofast -w -Wno-error -fno-builtin -fcommon $TP_PLL $CAM_INC"
           
-          echo "--- COMPILANDO COM LLVM TOTAL ---"
+          echo "--- COMPILANDO COM FORÇA TOTAL (-k) ---"
           
-          # ADICIONEI OBJDUMP e STRIP para parar a reclamação do 0x22
-          make -j$(nproc --all) O=out \
+          # Adicionado flag '-k' para ignorar erros no DTBO e continuar compilando o resto
+          # Voltamos com 'dtbs' para tentar gerar os arquivos de hardware
+          make -j$(nproc --all) -k O=out \
           ARCH=arm64 \
           CC=clang-15 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -117,7 +118,7 @@ jobs:
           HOSTCFLAGS="-w" \
           KBUILD_MODPOST_WARN=1 \
           CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
-          Image.gz-dtb
+          Image.gz-dtb dtbs || true
 
       - name: "8. Generate VBMeta"
         run: |
@@ -125,7 +126,7 @@ jobs:
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
           tar -cvf vbmeta_disabled.tar vbmeta_disabled.img
 
-      - name: "9. Package ZIP"
+      - name: "9. Package ZIP (The Collector)"
         run: |
           git clone https://github.com/osm0sis/AnyKernel3
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
@@ -137,12 +138,16 @@ jobs:
             cp out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
           fi
           
-          cd AnyKernel3 && zip -r9 ../A23-V35-SILENCE.zip *
+          # [A VOLTA] Procura por QUALQUER .dtbo que tenha sido gerado e coloca no ZIP
+          echo "Coletando DTBOs sobreviventes..."
+          find out/arch/arm64/boot/dts/ -name "*.dtbo" -exec cp {} AnyKernel3/ \; || true
+          
+          cd AnyKernel3 && zip -r9 ../A23-V36-COLLECTOR.zip *
 
       - name: "Upload Artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: A23_V35_SILENCE
+          name: A23_V36_COLLECTOR
           path: |
-            A23-V35-SILENCE.zip
+            A23-V36-COLLECTOR.zip
             vbmeta_disabled.tar
