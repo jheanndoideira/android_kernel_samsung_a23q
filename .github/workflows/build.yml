@@ -1,4 +1,4 @@
-name: A23_V37_SAFE_CLEAN
+name: A23_V38_PERFECTIONIST
 on:
   workflow_dispatch:
 
@@ -45,7 +45,7 @@ jobs:
           cp -R wireguard-linux-compat/src drivers/net/wireguard
           echo "obj-y += wireguard/" >> drivers/net/Makefile
 
-      - name: "5. Apply Patches & Fixes"
+      - name: "5. Apply Patches & Fixes (COMPLETO)"
         run: |
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
@@ -54,16 +54,19 @@ jobs:
           sed -i 's/print "error, forbidden warning:", m.group(2)/print("error, forbidden warning:", m.group(2))/g' scripts/gcc-wrapper.py
           sed -i 's/print "warning, allowed warning:", m.group(2)/print("warning, allowed warning:", m.group(2))/g' scripts/gcc-wrapper.py
           
-          # Fix Audio Headers
+          # Fix Headers (ÁUDIO + DISPLAY) - O QUE FALTAVA!
           cp -r techpack/audio/asoc/codecs/tas256x/physical_layer/inc/*.h include/linux/ 2>/dev/null || true
           cp -r techpack/audio/asoc/codecs/tas256x/logical_layer/inc/*.h include/linux/ 2>/dev/null || true
+          cp -r techpack/display/pll/*.h include/linux/ 2>/dev/null || true
 
-      - name: "6. Configure & Optimize"
+      - name: "6. Configure & Optimize (LTO REFORÇADO)"
         run: |
           mkdir -p out
           make O=out ARCH=arm64 rsuntk_defconfig
 
           # --- OTIMIZAÇÕES ---
+          # Ativa o LTO Pai antes do LTO Full para garantir
+          ./scripts/config --file out/.config --enable CONFIG_LTO_CLANG
           ./scripts/config --file out/.config --enable CONFIG_LTO_CLANG_FULL
           ./scripts/config --file out/.config --enable CONFIG_LLVM_POLLY
           ./scripts/config --file out/.config --enable CONFIG_HZ_300
@@ -93,7 +96,7 @@ jobs:
           
           yes "" | make O=out ARCH=arm64 olddefconfig
 
-      - name: "7. Compile (KERNEL ONLY)"
+      - name: "7. Compile (SAFE & CLEAN)"
         run: |
           TP_PLL="-I$(pwd)/techpack/display/pll"
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
@@ -101,11 +104,10 @@ jobs:
           
           export KCFLAGS="-O3 -Ofast -w -Wno-error -fno-builtin -fcommon $TP_PLL $CAM_INC"
           
-          echo "--- COMPILANDO APENAS KERNEL (SEM DTBO BUGADO) ---"
+          echo "--- COMPILANDO... ---"
           
-          # OBJDUMP/STRIP adicionados para limpar log 0x22
-          # SEM '-k' (Segurança Total)
-          # Alvo: APENAS Image.gz-dtb
+          # Sem DTBO bugado. Apenas o Kernel.
+          # OBJDUMP e STRIP para limpar logs.
           make -j$(nproc --all) O=out \
           ARCH=arm64 \
           CC=clang-15 \
@@ -139,14 +141,12 @@ jobs:
             cp out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
           fi
           
-          # NÃO incluímos DTBO aqui. O instalador vai manter o original seguro.
-          
-          cd AnyKernel3 && zip -r9 ../A23-V37-SAFE.zip *
+          cd AnyKernel3 && zip -r9 ../A23-V38-PERFECTIONIST.zip *
 
       - name: "Upload Artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: A23_V37_SAFE
+          name: A23_V38_PERFECTIONIST
           path: |
-            A23-V37-SAFE.zip
+            A23-V38-PERFECTIONIST.zip
             vbmeta_disabled.tar
