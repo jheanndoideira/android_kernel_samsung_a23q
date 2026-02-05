@@ -53,15 +53,7 @@ jobs:
           # Desativar travas Samsung RKP direto no código
           find $ROOT -name "Kconfig*" -exec sed -i 's/bool "Samsung RKP"/bool/g' {} +
 
-      - name: Build Untouchable (Tudo Incluso)
-        run: |
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-android-
-          export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
-          cd kernel_source
-          make vendor/a23_eur_open_defconfig
-          
-          # === O MOTOR DE PERFORMANCE (LTO + POLLY) ===
+                # === O MOTOR DE PERFORMANCE (LTO + POLLY) ===
           ./scripts/config --enable CONFIG_LTO_CLANG_FULL
           ./scripts/config --enable CONFIG_LLVM_POLLY
           ./scripts/config --enable CONFIG_HZ_300
@@ -80,6 +72,7 @@ jobs:
           ./scripts/config --enable CONFIG_ZSMALLOC
           ./scripts/config --enable CONFIG_PSI
           ./scripts/config --enable CONFIG_BPF_JIT
+          ./scripts/config --enable CONFIG_OVERLAY_FS
           
           # === SEGURANÇA E COMPATIBILIDADE DE DRIVERS ===
           ./scripts/config --enable CONFIG_KSU
@@ -92,11 +85,19 @@ jobs:
           ./scripts/config --disable CONFIG_TIMA
           ./scripts/config --disable CONFIG_SEC_RESTRICT_ROOTING
           
-          make olddefconfig
+          # [CORREÇÃO CRÍTICA] Desativa o que travou o log anterior
+          ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
+          
+          # [CORREÇÃO CRÍTICA] O "Sim" automático para não travar
+          yes "" | make olddefconfig
           
           # KCFLAGS - Headers incluídos explicitamente
           AUDIO_INC="-I$(pwd)/techpack/audio/asoc/codecs/tas256x/physical_layer/inc -I$(pwd)/techpack/audio/asoc/codecs/tas256x/os_layer/inc"
-          CAM_INC="-I$(pwd)/techpack/camera/drivers/cam_req_mgr"
+          
+          # [CORREÇÃO CRÍTICA] Adicionando caminhos da Câmera que faltavam
+          TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
+          CAM_INC="-I$TP_CAM/cam_cci -I$TP_CAM/cam_sensor_io -I$TP_CAM/cam_sensor_utils -I$(pwd)/techpack/camera/drivers/cam_req_mgr"
+          
           export KCFLAGS="-O3 -Ofast -w -pipe -march=armv8-a+crc+crypto -mllvm -polly -fno-builtin -fcommon $AUDIO_INC $CAM_INC"
           
           # Compilação Final com LLD
