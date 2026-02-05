@@ -1,4 +1,4 @@
-name: A23_V24_THE_SURGEON_FINAL
+name: A23_V25_THE_LAST_STAND
 on:
   workflow_dispatch:
 
@@ -31,9 +31,12 @@ jobs:
           echo "obj-y += kernelsu/" >> drivers/Makefile
           sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           
-          # [FIX KSU] Correção do erro 'filter_count' (Incompatibilidade com Kernel 4.19)
-          # Comentamos a linha problemática no código do KernelSU
+          # [FIX KSU] Erro filter_count (Seccomp)
           sed -i 's/atomic_set(&current->seccomp.filter_count, 0);/\/\/ atomic_set(&current->seccomp.filter_count, 0);/g' drivers/kernelsu/app_profile.c
+          
+          # [FIX KSU NOVO] Erro pgtable.h not found (Compatibilidade com Kernel 4.19)
+          # Criamos um arquivo falso que aponta para o verdadeiro
+          echo "#include <asm/pgtable.h>" > include/linux/pgtable.h
           
           # 2. SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
@@ -45,18 +48,23 @@ jobs:
           cp -R wireguard-linux-compat/src drivers/net/wireguard
           echo "obj-y += wireguard/" >> drivers/net/Makefile
 
-      - name: "Surgeon Fix V24 (Nuclear Audio Repair)"
+      - name: "Surgeon Fix V25 (Audio & Display Structure)"
         run: |
           ROOT=$(pwd)/kernel_source
           
-          # [FIX AUDIO] Copia headers para include/linux (Resolve 'file not found')
-          SRC_INC="$ROOT/techpack/audio/asoc/codecs/tas256x/physical_layer/inc"
-          cp $SRC_INC/*.h $ROOT/include/linux/ 2>/dev/null || true
+          # [FIX AUDIO] O erro pede "physical_layer/inc/tas256x.h"
+          # Vamos copiar a pasta inteira para onde o código está procurando
+          SRC_DIR="$ROOT/techpack/audio/asoc/codecs/tas256x/physical_layer"
+          DEST_DIR="$ROOT/techpack/audio/asoc/codecs/tas256x/os_layer/src"
+          cp -r $SRC_DIR $DEST_DIR/ 2>/dev/null || true
+          
+          # [FIX EXTRA] Garante headers na pasta global também
+          cp $SRC_DIR/inc/*.h $ROOT/include/linux/ 2>/dev/null || true
           
           # Desativa travas Samsung RKP
           find $ROOT -name "Kconfig*" -exec sed -i 's/bool "Samsung RKP"/bool/g' {} +
 
-      - name: "Build Surgeon (All Flags + Fixes)"
+      - name: "Build The Last Stand"
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
@@ -66,14 +74,14 @@ jobs:
           # 1. Limpa e prepara
           make vendor/a23_eur_open_defconfig
           
-          # 2. [FIX] Configs que travam (Broken Pipe / RELR)
+          # 2. Configs para não travar
           ./scripts/config --disable CONFIG_RELR
           ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
           ./scripts/config --set-val CONFIG_INIT_STACK_ALL_ZERO y
           ./scripts/config --set-val CONFIG_KPROBES y
           ./scripts/config --disable CONFIG_LTO_NONE
           
-          # 3. MOTOR DE PERFORMANCE
+          # 3. PERFORMANCE
           ./scripts/config --enable CONFIG_LTO_CLANG_FULL
           ./scripts/config --enable CONFIG_LLVM_POLLY
           ./scripts/config --enable CONFIG_HZ_300
@@ -87,7 +95,7 @@ jobs:
           ./scripts/config --enable CONFIG_DYNAMIC_FSYNC
           ./scripts/config --enable CONFIG_WIREGUARD
           
-          # 5. MEMÓRIA E ANDROID 16
+          # 5. ANDROID 16
           ./scripts/config --enable CONFIG_ZRAM_DEF_COMP_ZSTD
           ./scripts/config --enable CONFIG_ZSMALLOC
           ./scripts/config --enable CONFIG_PSI
@@ -105,17 +113,21 @@ jobs:
           ./scripts/config --disable CONFIG_TIMA
           ./scripts/config --disable CONFIG_SEC_RESTRICT_ROOTING
           
-          # 7. Sim automático
-          yes "" | make olddefconfig
+          # 7. Força o aceite das configs novas antes de compilar
+          make olddefconfig
           
-          # 8. Compilação Blindada
-          # [CAM FIX] Recolocando caminhos da câmera para garantir
+          # 8. Compilação com Caminhos Injetados
+          
+          # [FIX DISPLAY] Adicionei o caminho do Display PLL para resolver o erro 'pll_trace.h'
+          TP_PLL="-I$(pwd)/techpack/display/pll"
+          
+          # [FIX CAMERA] Caminhos da Câmera
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
           CAM_INC="-I$TP_CAM/cam_cci -I$TP_CAM/cam_sensor_io -I$TP_CAM/cam_sensor_utils -I$(pwd)/techpack/camera/drivers/cam_req_mgr"
           
-          export KCFLAGS="-O3 -Ofast -w -pipe -march=armv8-a+crc+crypto -mllvm -polly -fno-builtin -fcommon $CAM_INC"
+          export KCFLAGS="-O3 -Ofast -w -pipe -march=armv8-a+crc+crypto -mllvm -polly -fno-builtin -fcommon $TP_PLL $CAM_INC"
           
-          # DTC_FLAGS previne crash do DTBO
+          # DTC_FLAGS previne crash do DTBO, -k ignora erros menores
           make -j$(nproc --all) \
               CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
               LLVM=1 LLVM_IAS=0 \
@@ -128,10 +140,9 @@ jobs:
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
           sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.1/by-name/boot;|block=/dev/block/by-name/boot;|g' AnyKernel3/anykernel.sh
           
-          # Copia o Kernel Novo (Mantém o DTBO Original do Celular)
           cp kernel_source/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
           
-          cd AnyKernel3 && zip -r9 ../A23-V24-SURGEON.zip *
+          cd AnyKernel3 && zip -r9 ../A23-V25-LAST-STAND.zip *
 
       - name: "Create VBMeta"
         run: |
@@ -141,7 +152,8 @@ jobs:
       - name: "Upload Final Release"
         uses: actions/upload-artifact@v4
         with:
-          name: A23-V24-SURGEON-PACKAGE
+          name: A23-V25-LAST-STAND-PACKAGE
           path: |
-            A23-V24-SURGEON.zip
+            A23-V25-LAST-STAND.zip
             vbmeta_disabled.img
+            
