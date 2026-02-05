@@ -1,4 +1,4 @@
-name: A23_V41_REVIVAL
+name: A23_V42_EXORCIST
 on:
   workflow_dispatch:
 
@@ -59,7 +59,19 @@ jobs:
           cp -r techpack/audio/asoc/codecs/tas256x/logical_layer/inc/*.h include/linux/ 2>/dev/null || true
           cp -r techpack/display/pll/*.h include/linux/ 2>/dev/null || true
 
-      - name: "6. Configure & Optimize (FULL POWER)"
+      - name: "6. EXORCISE BROKEN DTBO (A Solução Final)"
+        run: |
+          echo "🔪 Removendo o arquivo quebrado da lista de compilação..."
+          # Este comando procura em todos os Makefiles dentro de dts/samsung
+          # e apaga a linha que chama o 'a23_eur_open_w00_r00.dtbo'
+          find arch/arm64/boot/dts/samsung -name "Makefile" -exec sed -i 's/a23_eur_open_w00_r00.dtbo//g' {} +
+          
+          # Segurança extra: remove também qualquer referência .dtbo solta que possa dar erro
+          find arch/arm64/boot/dts/samsung -name "Makefile" -exec sed -i 's/.*\.dtbo.*//g' {} + || true
+          
+          echo "✅ O arquivo maldito foi removido da lista!"
+
+      - name: "7. Configure & Optimize (FULL POWER)"
         run: |
           mkdir -p out
           make O=out ARCH=arm64 rsuntk_defconfig
@@ -95,7 +107,7 @@ jobs:
           
           yes "" | make O=out ARCH=arm64 olddefconfig
 
-      - name: "7. Compile (SURGERY - NO DTBS)"
+      - name: "8. Compile (AGORA VAI)"
         run: |
           TP_PLL="-I$(pwd)/techpack/display/pll"
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
@@ -105,7 +117,8 @@ jobs:
           
           echo "--- COMPILANDO ---"
           
-          # Mantido igual a V40 (Que funciona)
+          # Mesmo chamando Image.gz-dtb, ele não vai encontrar o DTBO quebrado na lista
+          # e vai pular para o próximo passo.
           make -j$(nproc --all) O=out \
           ARCH=arm64 \
           CC=clang-15 \
@@ -121,14 +134,13 @@ jobs:
           CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
           Image.gz-dtb
 
-      - name: "8. Generate VBMeta (LINK CORRIGIDO)"
+      - name: "9. Generate VBMeta (LINK CORRIGIDO)"
         run: |
-          # Usei o link da LineageOS que é garantido de funcionar
           curl -LO https://raw.githubusercontent.com/LineageOS/android_external_avb/lineage-20.0/avbtool.py
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
           tar -cvf vbmeta_disabled.tar vbmeta_disabled.img
 
-      - name: "9. Package ZIP"
+      - name: "10. Package ZIP"
         run: |
           git clone https://github.com/osm0sis/AnyKernel3
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
@@ -140,12 +152,12 @@ jobs:
             cp out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
           fi
           
-          cd AnyKernel3 && zip -r9 ../A23-V41-REVIVAL.zip *
+          cd AnyKernel3 && zip -r9 ../A23-V42-EXORCIST.zip *
 
       - name: "Upload Artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: A23_V41_REVIVAL
+          name: A23_V42_EXORCIST
           path: |
-            A23-V41-REVIVAL.zip
+            A23-V42-EXORCIST.zip
             vbmeta_disabled.tar
