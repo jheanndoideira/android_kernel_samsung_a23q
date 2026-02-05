@@ -1,4 +1,4 @@
-name: A23_Variant_G_EnvSpecialist
+name: A23_Variant_H_Fragmenter
 on:
   workflow_dispatch:
 
@@ -22,43 +22,34 @@ jobs:
           git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
 
-      - name: Inject KSU & SUSFS
+      - name: Create Config Fragment
         run: |
           cd kernel_source
-          git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
-          mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
-          echo "obj-y += kernelsu/" >> drivers/Makefile
-          sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+          # Cria um ficheiro com as configs de performance
+          echo "CONFIG_LTO_CLANG_FULL=y" > android16.config
+          echo "CONFIG_OVERLAY_FS=y" >> android16.config
+          echo "CONFIG_BPF_SYSCALL=y" >> android16.config
+          echo "CONFIG_KSU=y" >> android16.config
+          echo "CONFIG_KSU_SUSFS=y" >> android16.config
+          echo "# CONFIG_SHADOW_CALL_STACK is not set" >> android16.config
+          
+          # Funde as configurações
+          ARCH=arm64 scripts/kconfig/merge_config.sh -m arch/arm64/configs/vendor/a23_eur_open_defconfig android16.config
 
-      - name: Build with Environment Injection
+      - name: Audio Physical Fix & Build
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          ROOT=$(pwd)/kernel_source
+          cd kernel_source
           
-          # Mapeamento de caminhos nas variáveis de sistema do Clang
-          ADR="$ROOT/techpack/audio/asoc/codecs/tas256x"
-          CAM="$ROOT/techpack/camera/drivers/cam_sensor_module/cam_cci"
-          export CPATH="$ADR/physical_layer/inc:$ADR/logical_layer/inc:$ADR/algo/inc:$ADR/os_layer/inc:$CAM"
-          export C_INCLUDE_PATH=$CPATH
+          # Cópia física para garantir o techpack
+          ADR="techpack/audio/asoc/codecs/tas256x"
+          mkdir -p $ADR/os_layer/src/physical_layer/inc
+          cp $ADR/physical_layer/inc/*.h $ADR/os_layer/src/physical_layer/inc/ 2>/dev/null || true
           
-          cd $ROOT
-          make clean && make mrproper
-          make vendor/a23_eur_open_defconfig
-          
-          ./scripts/config --enable CONFIG_LTO_CLANG_FULL
-          ./scripts/config --enable CONFIG_OVERLAY_FS
-          ./scripts/config --enable CONFIG_BPF_SYSCALL
-          ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
-          
-          yes "" | make olddefconfig
-          
-          make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=0 KCFLAGS="-O3 -w"
+          make olddefconfig
+          make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- LLVM=1 KCFLAGS="-O3 -w"
 
       - name: Create VBMeta
         run: |
@@ -68,7 +59,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-EnvSpecialist-Kernel
+          name: A23-Fragmenter-Kernel
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
