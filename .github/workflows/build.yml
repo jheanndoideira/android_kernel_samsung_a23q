@@ -1,4 +1,4 @@
-name: A23_V34_THE_SNIPER
+name: A23_V35_SILENCE
 on:
   workflow_dispatch:
 
@@ -93,7 +93,7 @@ jobs:
           
           yes "" | make O=out ARCH=arm64 olddefconfig
 
-      - name: "7. Compile (NO DTBS = NO ERROR)"
+      - name: "7. Compile (TOOLS ALIGNED)"
         run: |
           TP_PLL="-I$(pwd)/techpack/display/pll"
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
@@ -101,10 +101,9 @@ jobs:
           
           export KCFLAGS="-O3 -Ofast -w -Wno-error -fno-builtin -fcommon $TP_PLL $CAM_INC"
           
-          echo "--- COMPILANDO APENAS O KERNEL (SEM DTBO BUGADO) ---"
+          echo "--- COMPILANDO COM LLVM TOTAL ---"
           
-          # AQUI ESTÁ A MÁGICA: Removi 'dtbs'. 
-          # Agora ele compila só o Image.gz-dtb e não trava no erro da Samsung.
+          # ADICIONEI OBJDUMP e STRIP para parar a reclamação do 0x22
           make -j$(nproc --all) O=out \
           ARCH=arm64 \
           CC=clang-15 \
@@ -112,6 +111,7 @@ jobs:
           CROSS_COMPILE=aarch64-linux-gnu- \
           CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
           LD=ld.lld-15 AR=llvm-ar-15 NM=llvm-nm-15 \
+          OBJDUMP=llvm-objdump-15 STRIP=llvm-strip-15 \
           LLVM_IAS=0 \
           DTC_FLAGS="-@" \
           HOSTCFLAGS="-w" \
@@ -131,22 +131,18 @@ jobs:
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
           sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.1/by-name/boot;|block=/dev/block/by-name/boot;|g' AnyKernel3/anykernel.sh
           
-          # Copia Kernel
           if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
             cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
           else
             cp out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
           fi
           
-          # NÃO COPIAMOS DTBO PORQUE O SOURCE ESTÁ QUEBRADO.
-          # O AnyKernel3 vai manter o original do seu celular.
-          
-          cd AnyKernel3 && zip -r9 ../A23-V34-SNIPER.zip *
+          cd AnyKernel3 && zip -r9 ../A23-V35-SILENCE.zip *
 
       - name: "Upload Artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: A23_V34_SNIPER
+          name: A23_V35_SILENCE
           path: |
-            A23-V34-SNIPER.zip
+            A23-V35-SILENCE.zip
             vbmeta_disabled.tar
