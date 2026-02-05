@@ -1,4 +1,4 @@
-name: A23_Variant_C_Forest
+name: A23_Variant_D_Injector
 on:
   workflow_dispatch:
 
@@ -33,29 +33,26 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-      - name: Create Symlink Forest
+      - name: Modify Main Makefile (Injection)
         run: |
-          ROOT=$(pwd)/kernel_source
-          AUDIO_ROOT=$ROOT/techpack/audio/asoc/codecs/tas256x
+          cd kernel_source
           
-          echo "=== Plantando a Floresta de Atalhos ==="
+          # Define os caminhos problemáticos
+          AUD_PATH="techpack/audio/asoc/codecs/tas256x"
+          CAM_PATH="techpack/camera/drivers"
           
-          # Encontra TODAS as subpastas dentro do diretório do driver tas256x
-          # E cria links para as camadas físicas/lógicas dentro de CADA UMA delas.
-          find $AUDIO_ROOT -type d | while read dir; do
-            ln -sf $AUDIO_ROOT/physical_layer/inc $dir/physical_layer 2>/dev/null || true
-            ln -sf $AUDIO_ROOT/logical_layer/inc $dir/logical_layer 2>/dev/null || true
-            ln -sf $AUDIO_ROOT/algo/inc $dir/algo 2>/dev/null || true
-            ln -sf $AUDIO_ROOT/os_layer/inc $dir/os_layer 2>/dev/null || true
-          done
+          # Injeta na variável LINUXINCLUDE do Makefile raiz
+          # Isso força esses caminhos a serem vistos por TODO O SISTEMA
+          sed -i "s|^LINUXINCLUDE.*|& -I\$(srctree)/$AUD_PATH/physical_layer/inc -I\$(srctree)/$AUD_PATH/logical_layer/inc -I\$(srctree)/$AUD_PATH/algo/inc -I\$(srctree)/$CAM_PATH/cam_sensor_module/cam_cci|" Makefile
           
-          # Fix Câmera (Mesma lógica: espalhar os headers)
-          CAM_ROOT=$ROOT/techpack/camera/drivers/cam_utils
-          find $ROOT/techpack/camera -type d | while read dir; do
-             ln -sf $CAM_ROOT/*.h $dir/ 2>/dev/null || true
-          done
+          # Correção extra para garantir
+          sed -i "s|^USERINCLUDE.*|& -I\$(srctree)/$AUD_PATH/physical_layer/inc -I\$(srctree)/$AUD_PATH/logical_layer/inc|" Makefile
+          
+          # Display Fix
+          cd techpack/display/pll
+          sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
 
-      - name: Build with Forest Method
+      - name: Build with Injection Method
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
@@ -72,7 +69,7 @@ jobs:
           
           yes "" | make olddefconfig
           
-          # Compila sem precisar de flags extras, pois os arquivos já estão "localmente" em cada pasta
+          # Sem flags extras aqui, porque já editamos o Makefile
           make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- LLVM=1 LLVM_IAS=0 KCFLAGS="-O3 -w"
 
       - name: Create VBMeta & Upload
@@ -81,7 +78,7 @@ jobs:
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
       - uses: actions/upload-artifact@v4
         with:
-          name: A23-Forest-Kernel
+          name: A23-Injector-Kernel
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
