@@ -1,4 +1,4 @@
-name: A23_Extreme_A16_LTO
+name: A23_Supernova_LTO_Final
 on:
   workflow_dispatch:
 
@@ -25,7 +25,7 @@ jobs:
           git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
 
-      - name: Inject KernelSU Next
+      - name: Inject KernelSU Next & SUSFS
         run: |
           cd kernel_source
           git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
@@ -33,33 +33,35 @@ jobs:
           rm -rf temp_ksu
           echo "obj-y += kernelsu/" >> drivers/Makefile
           sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-
-      - name: Inject SUSFS
-        run: |
+          
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
-          cp susfs4ksu/kernel_patches/fs/susfs.c kernel_source/fs/
-          cp susfs4ksu/kernel_patches/include/linux/susfs.h kernel_source/include/linux/
-          cd kernel_source
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
+          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-          if ! grep -q "susfs" fs/Makefile; then echo "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" >> fs/Makefile; fi
 
-      - name: Manual Path Reconstruction (Audio & Camera)
+      - name: Universal Header Fix (The Radar)
         run: |
           ROOT=$GITHUB_WORKSPACE/kernel_source
-          cd $ROOT/techpack/audio/asoc/codecs/tas256x/os_layer/src
-          mkdir -p physical_layer/inc logical_layer/inc algo/inc os_layer/inc
-          cp ../../physical_layer/inc/* physical_layer/inc/ 2>/dev/null || true
-          cp ../../logical_layer/inc/* logical_layer/inc/ 2>/dev/null || true
-          cp ../../algo/inc/* algo/inc/ 2>/dev/null || true
-          cp ../inc/* os_layer/inc/ 2>/dev/null || true
           
-          cd $ROOT/techpack/camera/drivers/cam_utils
-          cp ../cam_req_mgr/*.h . 2>/dev/null || true
-          
+          echo "=== Ensinando o compilador a nunca mais se perder ==="
+          # Corrige o Display Trace
           cd $ROOT/techpack/display/pll
           sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
+          
+          # Cria links simbólicos absolutos para as pastas de áudio e câmera
+          # Isso faz com que qualquer arquivo em qualquer lugar ache os headers
+          cd $ROOT
+          # Audio Fix
+          ln -sf $(pwd)/techpack/audio/asoc/codecs/tas256x/physical_layer techpack/audio/asoc/codecs/tas256x/os_layer/src/physical_layer
+          ln -sf $(pwd)/techpack/audio/asoc/codecs/tas256x/logical_layer techpack/audio/asoc/codecs/tas256x/os_layer/src/logical_layer
+          ln -sf $(pwd)/techpack/audio/asoc/codecs/tas256x/algo techpack/audio/asoc/codecs/tas256x/os_layer/src/algo
+          
+          # Camera Fix (CCI e Sensor)
+          cd $ROOT/techpack/camera/drivers/cam_sensor_module
+          ln -sf ../cam_cci/cam_cci_dev.h cam_sensor_utils/cam_cci_dev.h || true
+          ln -sf ../cam_cci/cam_cci_dev.h cam_sensor_io/cam_cci_dev.h || true
 
-      - name: Build Kernel (LTO EXTREME)
+      - name: Build Kernel (FORCED LTO & PERFORMANCE)
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
@@ -70,28 +72,34 @@ jobs:
           make clean && make mrproper
           make vendor/a23_eur_open_defconfig
           
-          # === TUNING DE PERFORMANCE EXTREMA ===
-          ./scripts/config --file .config \
-            --enable CONFIG_LTO_CLANG_FULL \
-            --disable CONFIG_THINLTO \
-            --disable CONFIG_SHADOW_CALL_STACK \
-            --enable CONFIG_KSU \
-            --enable CONFIG_KSU_SUSFS \
-            --enable CONFIG_OVERLAY_FS \
-            --enable CONFIG_BPF_SYSCALL \
-            --enable CONFIG_IP_NF_TARGET_TTL \
-            --enable CONFIG_JUMP_LABEL \
-            --enable CONFIG_HZ_300 \
-            --enable CONFIG_PREEMPT \
-            --disable CONFIG_DEBUG_KERNEL \
-            --disable CONFIG_SAMSUNG_DEBUG
-            
-          # O "yes" configurado para aceitar LTO e negar Shadow Call Stack
-          # Resposta 2 para LTO_CLANG e 'n' para Shadow Call Stack
-          printf "2\nn\ny\n" | make olddefconfig
+          # === ATIVAÇÃO FORÇADA DE LTO E ANDROID 16 ===
+          # Usamos o scripts/config para garantir que o menu não apareça
+          ./scripts/config --enable CONFIG_LTO_CLANG_FULL
+          ./scripts/config --disable CONFIG_LTO_NONE
+          ./scripts/config --disable CONFIG_THINLTO
+          ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
+          ./scripts/config --enable CONFIG_KSU
+          ./scripts/config --enable CONFIG_KSU_SUSFS
+          ./scripts/config --enable CONFIG_OVERLAY_FS
+          ./scripts/config --enable CONFIG_BPF_SYSCALL
+          ./scripts/config --enable CONFIG_JUMP_LABEL
           
-          echo "=== COMPILANDO COM LTO (ISSO VAI DEMORAR) ==="
-          export KCFLAGS="-O3 -w -fno-builtin -fcommon -pipe -march=armv8-a+crc+crypto"
+          # Responde 'Sim' para qualquer pergunta residual (como o RELR)
+          yes "" | make olddefconfig
+          
+          echo "=== INICIANDO COMPILAÇÃO EXTREMA ==="
+          # Adicionamos as pastas do techpack diretamente no comando de compilação
+          # Isso é o 'Radar' que eu te falei
+          AD_BASE="techpack/audio/asoc/codecs/tas256x"
+          CAM_BASE="techpack/camera/drivers"
+          
+          export KCFLAGS="-O3 -w -fno-builtin -fcommon -pipe -march=armv8-a+crc+crypto \
+          -I$(pwd)/$AD_BASE/physical_layer/inc \
+          -I$(pwd)/$AD_BASE/logical_layer/inc \
+          -I$(pwd)/$AD_BASE/algo/inc \
+          -I$(pwd)/$CAM_BASE/cam_sensor_module/cam_cci \
+          -I$(pwd)/$CAM_BASE/cam_req_mgr"
+          
           make -j$(nproc --all) \
               CC=clang \
               CROSS_COMPILE=aarch64-linux-android- \
@@ -107,7 +115,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-Extreme-LTO-Kernel
+          name: A23-Supernova-LTO
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
