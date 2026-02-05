@@ -1,4 +1,4 @@
-name: A23_V42_EXORCIST
+name: VBMeta_Factory_Samsung
 on:
   workflow_dispatch:
 
@@ -6,158 +6,60 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: "🔥 1. Turbo Disk Cleanup"
-        run: |
-          echo "Limpando lixo..."
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          docker image prune --all --force
-
-      - name: "2. Checkout YOUR Repo"
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: "3. Setup Environment (Clang 15)"
+      - name: "🛠️ 1. Setup Environment"
         run: |
           sudo apt update
-          sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi build-essential libssl-dev bison flex device-tree-compiler python3 python2
-          sudo ln -sf /usr/bin/python2 /usr/bin/python
+          sudo apt install -y python3 python3-pip tar
 
-      - name: "4. Inject KSU Next, SUSFS & WireGuard"
+      - name: "📥 2. Download AVBTool (LineageOS Official)"
         run: |
-          # KernelSU Next
-          git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
-          mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
-          sed -i 's/TWA_RESUME/1/g' drivers/kernelsu/allowlist.c
-          sed -i 's/atomic_set(&current->seccomp.filter_count, 0);/\/\/ atomic_set(&current->seccomp.filter_count, 0);/g' drivers/kernelsu/app_profile.c
-          echo "obj-y += kernelsu/" >> drivers/Makefile
-          sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          echo "#include <asm/pgtable.h>" > include/linux/pgtable.h
-
-          # SUSFS & WireGuard
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-          
-          git clone --depth 1 https://github.com/WireGuard/wireguard-linux-compat.git
-          cp -R wireguard-linux-compat/src drivers/net/wireguard
-          echo "obj-y += wireguard/" >> drivers/net/Makefile
-
-      - name: "5. Apply Patches & Fixes"
-        run: |
-          sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
-          sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
-          
-          # Fix Python 3
-          sed -i 's/print "error, forbidden warning:", m.group(2)/print("error, forbidden warning:", m.group(2))/g' scripts/gcc-wrapper.py
-          sed -i 's/print "warning, allowed warning:", m.group(2)/print("warning, allowed warning:", m.group(2))/g' scripts/gcc-wrapper.py
-          
-          # Fix Headers (TODOS)
-          cp -r techpack/audio/asoc/codecs/tas256x/physical_layer/inc/*.h include/linux/ 2>/dev/null || true
-          cp -r techpack/audio/asoc/codecs/tas256x/logical_layer/inc/*.h include/linux/ 2>/dev/null || true
-          cp -r techpack/display/pll/*.h include/linux/ 2>/dev/null || true
-
-      - name: "6. EXORCISE BROKEN DTBO (A Solução Final)"
-        run: |
-          echo "🔪 Removendo o arquivo quebrado da lista de compilação..."
-          # Este comando procura em todos os Makefiles dentro de dts/samsung
-          # e apaga a linha que chama o 'a23_eur_open_w00_r00.dtbo'
-          find arch/arm64/boot/dts/samsung -name "Makefile" -exec sed -i 's/a23_eur_open_w00_r00.dtbo//g' {} +
-          
-          # Segurança extra: remove também qualquer referência .dtbo solta que possa dar erro
-          find arch/arm64/boot/dts/samsung -name "Makefile" -exec sed -i 's/.*\.dtbo.*//g' {} + || true
-          
-          echo "✅ O arquivo maldito foi removido da lista!"
-
-      - name: "7. Configure & Optimize (FULL POWER)"
-        run: |
-          mkdir -p out
-          make O=out ARCH=arm64 rsuntk_defconfig
-
-          # --- OTIMIZAÇÕES MÁXIMAS ---
-          ./scripts/config --file out/.config --enable CONFIG_LTO_CLANG
-          ./scripts/config --file out/.config --enable CONFIG_LTO_CLANG_FULL
-          ./scripts/config --file out/.config --enable CONFIG_LLVM_POLLY
-          ./scripts/config --file out/.config --enable CONFIG_HZ_300
-          ./scripts/config --file out/.config --enable CONFIG_PREEMPT
-          ./scripts/config --file out/.config --enable CONFIG_TCP_CONG_BBR
-          ./scripts/config --file out/.config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
-          ./scripts/config --file out/.config --enable CONFIG_IOSCHED_MAPLE
-          ./scripts/config --file out/.config --set-str CONFIG_DEFAULT_IOSCHED "maple"
-          
-          # --- FEATURES ---
-          ./scripts/config --file out/.config --enable CONFIG_ZRAM_DEF_COMP_ZSTD
-          ./scripts/config --file out/.config --enable CONFIG_ZSMALLOC
-          ./scripts/config --file out/.config --enable CONFIG_PSI
-          ./scripts/config --file out/.config --enable CONFIG_BPF_JIT
-          ./scripts/config --file out/.config --enable CONFIG_KSU
-          ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
-          ./scripts/config --file out/.config --enable CONFIG_WIREGUARD
-
-          # --- FIXES ---
-          ./scripts/config --file out/.config --enable SECTION_MISMATCH_WARN_ONLY
-          ./scripts/config --file out/.config --disable REFCOUNT_FULL
-          ./scripts/config --file out/.config --disable PANIC_ON_REFCOUNT_ERROR
-          ./scripts/config --file out/.config --disable SHADOW_CALL_STACK
-          ./scripts/config --file out/.config --disable RELR
-          ./scripts/config --file out/.config --disable CONFIG_RKP_KDP
-          ./scripts/config --file out/.config --disable CONFIG_TIMA
-          
-          yes "" | make O=out ARCH=arm64 olddefconfig
-
-      - name: "8. Compile (AGORA VAI)"
-        run: |
-          TP_PLL="-I$(pwd)/techpack/display/pll"
-          TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
-          CAM_INC="-I$TP_CAM/cam_cci -I$TP_CAM/cam_sensor_io -I$TP_CAM/cam_sensor_utils -I$(pwd)/techpack/camera/drivers/cam_req_mgr"
-          
-          export KCFLAGS="-O3 -Ofast -w -Wno-error -fno-builtin -fcommon $TP_PLL $CAM_INC"
-          
-          echo "--- COMPILANDO ---"
-          
-          # Mesmo chamando Image.gz-dtb, ele não vai encontrar o DTBO quebrado na lista
-          # e vai pular para o próximo passo.
-          make -j$(nproc --all) O=out \
-          ARCH=arm64 \
-          CC=clang-15 \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-          LD=ld.lld-15 AR=llvm-ar-15 NM=llvm-nm-15 \
-          OBJDUMP=llvm-objdump-15 STRIP=llvm-strip-15 \
-          LLVM_IAS=0 \
-          DTC_FLAGS="-@" \
-          HOSTCFLAGS="-w" \
-          KBUILD_MODPOST_WARN=1 \
-          CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
-          Image.gz-dtb
-
-      - name: "9. Generate VBMeta (LINK CORRIGIDO)"
-        run: |
+          # Baixando a ferramenta oficial da LineageOS (mais confiável)
           curl -LO https://raw.githubusercontent.com/LineageOS/android_external_avb/lineage-20.0/avbtool.py
-          python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
-          tar -cvf vbmeta_disabled.tar vbmeta_disabled.img
+          chmod +x avbtool.py
 
-      - name: "10. Package ZIP"
+      - name: "🏭 3. Generate VBMeta Variants"
         run: |
-          git clone https://github.com/osm0sis/AnyKernel3
-          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
-          sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.1/by-name/boot;|block=/dev/block/by-name/boot;|g' AnyKernel3/anykernel.sh
+          mkdir -p output
+
+          echo "--- VARIANTE 1: Standard (4KB) ---"
+          # Essa é a padrão (que deu 10KB no final). Vamos tentar mudar o algoritmo.
+          python3 avbtool.py make_vbmeta_image \
+            --flags 2 \
+            --padding_size 4096 \
+            --output output/vbmeta_v1_std.img
+
+          echo "--- VARIANTE 2: Samsung Safe (8KB) ---"
+          # Dobramos o tamanho. Samsung gosta de blocos de 8KB ou 16KB.
+          python3 avbtool.py make_vbmeta_image \
+            --flags 2 \
+            --padding_size 8192 \
+            --output output/vbmeta_v2_8kb.img
+
+          echo "--- VARIANTE 3: Big Block (16KB) ---"
+          # Tamanho maior para garantir que o Odin não reclame de "Size".
+          python3 avbtool.py make_vbmeta_image \
+            --flags 2 \
+            --padding_size 16384 \
+            --output output/vbmeta_v3_16kb.img
+
+      - name: "📦 4. Package TARs (Odin Ready)"
+        run: |
+          cd output
           
-          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
-            cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
-          else
-            cp out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
-          fi
+          # Empacota cada uma em um .tar separado para o Odin
+          tar -cvf vbmeta_v1_std.tar vbmeta_v1_std.img
+          # Renomeia dentro do tar para o Odin reconhecer sempre como vbmeta.img
+          mv vbmeta_v2_8kb.img vbmeta.img
+          tar -cvf vbmeta_v2_8kb.tar vbmeta.img
           
-          cd AnyKernel3 && zip -r9 ../A23-V42-EXORCIST.zip *
+          mv vbmeta_v3_16kb.img vbmeta.img
+          tar -cvf vbmeta_v3_16kb.tar vbmeta.img
+          
+          # Remove os .img soltos para não confundir
+          rm vbmeta.img vbmeta_v1_std.img
 
       - name: "Upload Artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: A23_V42_EXORCIST
-          path: |
-            A23-V42-EXORCIST.zip
-            vbmeta_disabled.tar
+          name: VBMeta_Collection
+          path: output/*.tar
