@@ -1,4 +1,4 @@
-name: A23_OMEGA_SUPREME_A16
+name: A23_ULTIMATE_OMEGA_V3
 on:
   workflow_dispatch:
 
@@ -35,7 +35,7 @@ jobs:
 
       - name: The Surgeon Fix (Audio/Camera/Display)
         run: |
-          # Correção definitiva do Techpack
+          # Correção definitiva do Techpack (O erro que nos perseguia)
           cd kernel_source/techpack/audio/asoc/codecs/tas256x
           find . -type f -name "*.[ch]" -exec sed -i 's|physical_layer/inc/||g' {} +
           find . -type f -name "*.[ch]" -exec sed -i 's|logical_layer/inc/||g' {} +
@@ -43,7 +43,7 @@ jobs:
           cd ../../../../display/pll
           sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
 
-      - name: Build OMEGA (Ultimate Performance)
+      - name: Build OMEGA (Final Version)
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
@@ -52,13 +52,13 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # === PERFORMANCE & REDE ===
+          # === PERFORMANCE E REDE ===
           ./scripts/config --enable CONFIG_LTO_CLANG_FULL
           ./scripts/config --enable CONFIG_HZ_300
           ./scripts/config --enable CONFIG_TCP_CONG_BBR
           ./scripts/config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
           
-          # === ROOT & ANDROID 16 (OS DETALHES QUE FALTAVAM) ===
+          # === ROOT & ANDROID 16 (ESSENCIAIS) ===
           ./scripts/config --enable CONFIG_KSU
           ./scripts/config --enable CONFIG_KSU_SUSFS
           ./scripts/config --enable CONFIG_KPROBES
@@ -67,14 +67,14 @@ jobs:
           ./scripts/config --enable CONFIG_BPF_SYSCALL
           ./scripts/config --enable CONFIG_MODULES
           
-          # === LIMPEZA DE SEGURANÇA (PARA PERFORMANCE) ===
+          # === DESATIVAR BLOQUEIOS DE SEGURANÇA ===
           ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
           ./scripts/config --disable CONFIG_DEBUG_KERNEL
           ./scripts/config --disable CONFIG_SAMSUNG_DEBUG_LOG
           
           yes "" | make olddefconfig
           
-          # Flags "Extreme" de Compilação
+          # Flags "Extreme" - Otimização total para o chip do A23
           ADR="techpack/audio/asoc/codecs/tas256x"
           export KCFLAGS="-O3 -Ofast -w -pipe -march=armv8-a+crc+crypto -fno-builtin -fcommon -I$(pwd)/$ADR/physical_layer/inc -I$(pwd)/$ADR/logical_layer/inc"
           
@@ -87,11 +87,11 @@ jobs:
 
       - name: Create Artifacts
         run: |
-          wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py || curl -LO https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
+          curl -LO https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
       - uses: actions/upload-artifact@v4
         with:
-          name: A23-OMEGA-SUPREME
+          name: A23-OMEGA-SUPREME-FINAL
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
