@@ -1,4 +1,4 @@
-name: A23_Variant_D_Injector
+name: A23_Alpha_Prime_LIDER
 on:
   workflow_dispatch:
 
@@ -22,7 +22,7 @@ jobs:
           git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
 
-      - name: Inject KSU & SUSFS
+      - name: Inject KernelSU Next & SUSFS
         run: |
           cd kernel_source
           git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
@@ -33,26 +33,37 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-      - name: Modify Main Makefile (Injection)
+      - name: Pre-Configuration (LTO & Android 16)
         run: |
           cd kernel_source
-          
-          # Define os caminhos problemáticos
-          AUD_PATH="techpack/audio/asoc/codecs/tas256x"
-          CAM_PATH="techpack/camera/drivers"
-          
-          # Injeta na variável LINUXINCLUDE do Makefile raiz
-          # Isso força esses caminhos a serem vistos por TODO O SISTEMA
-          sed -i "s|^LINUXINCLUDE.*|& -I\$(srctree)/$AUD_PATH/physical_layer/inc -I\$(srctree)/$AUD_PATH/logical_layer/inc -I\$(srctree)/$AUD_PATH/algo/inc -I\$(srctree)/$CAM_PATH/cam_sensor_module/cam_cci|" Makefile
-          
-          # Correção extra para garantir
-          sed -i "s|^USERINCLUDE.*|& -I\$(srctree)/$AUD_PATH/physical_layer/inc -I\$(srctree)/$AUD_PATH/logical_layer/inc|" Makefile
-          
-          # Display Fix
-          cd techpack/display/pll
-          sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
+          CONF="arch/arm64/configs/vendor/a23_eur_open_defconfig"
+          # Injeta as opções diretamente no arquivo para evitar o erro de "End of File"
+          sed -i '$a CONFIG_LTO_CLANG_FULL=y' $CONF
+          sed -i '$a CONFIG_OVERLAY_FS=y' $CONF
+          sed -i '$a CONFIG_BPF_SYSCALL=y' $CONF
+          sed -i '$a CONFIG_KSU=y' $CONF
+          sed -i '$a CONFIG_KSU_SUSFS=y' $CONF
+          sed -i '$a CONFIG_IP_NF_TARGET_TTL=y' $CONF
+          sed -i '$a CONFIG_JUMP_LABEL=y' $CONF
+          sed -i '$a # CONFIG_SHADOW_CALL_STACK is not set' $CONF
 
-      - name: Build with Injection Method
+      - name: Absolute Path Reconstruction (Audio/Camera/Display)
+        run: |
+          ROOT=$(pwd)/kernel_source
+          # Resolve Display
+          cd $ROOT/techpack/display/pll
+          sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
+          
+          # Resolve Audio (Cópia Direta para evitar erro de Link simbólico)
+          ADR="$ROOT/techpack/audio/asoc/codecs/tas256x"
+          mkdir -p $ADR/os_layer/src/physical_layer/inc
+          mkdir -p $ADR/os_layer/src/logical_layer/inc
+          mkdir -p $ADR/os_layer/src/algo/inc
+          cp $ADR/physical_layer/inc/*.h $ADR/os_layer/src/physical_layer/inc/ 2>/dev/null || true
+          cp $ADR/logical_layer/inc/*.h $ADR/os_layer/src/logical_layer/inc/ 2>/dev/null || true
+          cp $ADR/algo/inc/*.h $ADR/os_layer/src/algo/inc/ 2>/dev/null || true
+
+      - name: Build Alpha Prime
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
@@ -63,22 +74,25 @@ jobs:
           make clean && make mrproper
           make vendor/a23_eur_open_defconfig
           
-          ./scripts/config --enable CONFIG_LTO_CLANG_FULL
-          ./scripts/config --enable CONFIG_OVERLAY_FS
-          ./scripts/config --enable CONFIG_BPF_SYSCALL
+          # Força o LTO nas escolhas interativas residuais
+          printf "2\nn\ny\n" | make olddefconfig
           
-          yes "" | make olddefconfig
+          # Injeção Global de Headers no KCFLAGS
+          ADR_INC="techpack/audio/asoc/codecs/tas256x"
+          CAM_INC="techpack/camera/drivers"
+          export KCFLAGS="-O3 -w -I$(pwd)/$ADR_INC/physical_layer/inc -I$(pwd)/$ADR_INC/logical_layer/inc -I$(pwd)/$ADR_INC/algo/inc -I$(pwd)/$CAM_INC/cam_sensor_module/cam_cci"
           
-          # Sem flags extras aqui, porque já editamos o Makefile
-          make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- LLVM=1 LLVM_IAS=0 KCFLAGS="-O3 -w"
+          make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=0
 
-      - name: Create VBMeta & Upload
+      - name: Create VBMeta
         run: |
           wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: A23-Injector-Kernel
+          name: A23-Alpha-Prime-Image
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
