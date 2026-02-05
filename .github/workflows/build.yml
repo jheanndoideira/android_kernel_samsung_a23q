@@ -1,4 +1,4 @@
-name: A23_V29_PYTHON_SLAYER
+name: A23_V31_HOMECOMING
 on:
   workflow_dispatch:
 
@@ -6,21 +6,20 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - name: "Checkout YOUR Repo (Where rsuntk_defconfig lives)"
+        uses: actions/checkout@v4
         with:
-          repository: potatogeek/kernel-a235m-f
-          path: kernel_source
           fetch-depth: 1
+          # REMOVI A LINHA 'repository'. AGORA ELE USA O SEU CÓDIGO!
 
       - name: "Setup Environment (Clang 15)"
         run: |
           sudo apt update
           sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi build-essential libssl-dev bison flex device-tree-compiler python3 python2
+          sudo ln -sf /usr/bin/python2 /usr/bin/python
 
       - name: "Inject KSU Next, SUSFS & WireGuard"
         run: |
-          cd kernel_source
-          
           # 1. KernelSU Next
           git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
           mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
@@ -45,31 +44,27 @@ jobs:
           cp -R wireguard-linux-compat/src drivers/net/wireguard
           echo "obj-y += wireguard/" >> drivers/net/Makefile
 
-      - name: "Apply Critical Patches (From Working Script)"
+      - name: "Apply Critical Patches & Fixes"
         run: |
-          cd kernel_source
+          # Patches do seu script original
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
-          cp -r techpack/audio/asoc/codecs/tas256x/physical_layer/inc/*.h include/linux/ 2>/dev/null || true
-
-      - name: "FIX PYTHON 2 vs 3 (O ERRO QUE DEU AGORA)"
-        run: |
-          cd kernel_source
-          # O erro foi: SyntaxError: Missing parentheses in call to 'print'
-          # Solução: Reescrever o arquivo para ser compatível com Python 3
           
-          echo "Aplicando correção no scripts/gcc-wrapper.py..."
+          # FIX PYTHON 2 vs 3 (O erro de parenteses)
+          # Isso é necessário porque o source base ainda é antigo
           sed -i 's/print "error, forbidden warning:", m.group(2)/print("error, forbidden warning:", m.group(2))/g' scripts/gcc-wrapper.py
           sed -i 's/print "warning, allowed warning:", m.group(2)/print("warning, allowed warning:", m.group(2))/g' scripts/gcc-wrapper.py
           
-          # Força o link do python para python2 também, por garantia
-          sudo ln -sf /usr/bin/python2 /usr/bin/python
+          # FIX HEADERS DE AUDIO/DISPLAY
+          cp -r techpack/audio/asoc/codecs/tas256x/physical_layer/inc/*.h include/linux/ 2>/dev/null || true
+          cp -r techpack/display/pll/*.h include/linux/ 2>/dev/null || true
 
-      - name: "Configure & Optimize"
+      - name: "Configure & Optimize (Usando rsuntk_defconfig)"
         run: |
-          cd kernel_source
           mkdir -p out
-          make O=out rsuntk_defconfig
+          
+          # AGORA VAI ACHAR: Estamos na raiz do seu repo e ARCH=arm64
+          make O=out ARCH=arm64 rsuntk_defconfig
 
           # --- OTIMIZAÇÕES ---
           scripts/config --file out/.config --enable CONFIG_LTO_CLANG_FULL
@@ -100,19 +95,27 @@ jobs:
           scripts/config --file out/.config --disable CONFIG_TIMA
           scripts/config --file out/.config --disable CONFIG_SEC_RESTRICT_ROOTING
           
-          yes "" | make O=out olddefconfig
+          # Aceita e gera o .config final
+          yes "" | make O=out ARCH=arm64 olddefconfig
 
-      - name: "Compile (Fusion)"
+      - name: "Compile (Targets: DTBO + Image.gz-dtb)"
         run: |
-          cd kernel_source
+          # Definição de Includes
           TP_PLL="-I$(pwd)/techpack/display/pll"
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
           CAM_INC="-I$TP_CAM/cam_cci -I$TP_CAM/cam_sensor_io -I$TP_CAM/cam_sensor_utils -I$(pwd)/techpack/camera/drivers/cam_req_mgr"
+          
           export KCFLAGS="-O3 -Ofast -w -Wno-error -fno-builtin -fcommon $TP_PLL $CAM_INC"
           
-          # AQUI TAMBÉM: KBUILD_CFLAGS="-w" ajuda a silenciar warnings que o wrapper tenta pegar
+          echo "--- COMPILANDO NO SEU REPO ---"
+          
           yes "" | make -j$(nproc --all) O=out \
-          CC=clang-15 LD=ld.lld-15 AR=llvm-ar-15 NM=llvm-nm-15 \
+          ARCH=arm64 \
+          CC=clang-15 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+          LD=ld.lld-15 AR=llvm-ar-15 NM=llvm-nm-15 \
           LLVM_IAS=0 \
           DTC_FLAGS="-@" \
           KBUILD_MODPOST_WARN=1 \
@@ -133,24 +136,25 @@ jobs:
           sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.1/by-name/boot;|block=/dev/block/by-name/boot;|g' AnyKernel3/anykernel.sh
           
           # Copia Kernel
-          if [ -f kernel_source/out/arch/arm64/boot/Image.gz-dtb ]; then
-            cp kernel_source/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
+          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+            cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
           else
-             cp kernel_source/out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
+             # Fallback para Image se falhar o gz-dtb
+             cp out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
           fi
           
           # Copia DTBO
-          if [ -f kernel_source/out/arch/arm64/boot/dtbo.img ]; then
-            cp kernel_source/out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
+          if [ -f out/arch/arm64/boot/dtbo.img ]; then
+            cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
           fi
           
-          cd AnyKernel3 && zip -r9 ../A23-V29-PYTHON-SLAYER.zip *
+          cd AnyKernel3 && zip -r9 ../A23-V31-HOMECOMING.zip *
 
       - name: "Upload Artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: A23_V29_PYTHON_SLAYER
+          name: A23_V31_HOMECOMING
           path: |
-            A23-V29-PYTHON-SLAYER.zip
+            A23-V31-HOMECOMING.zip
             vbmeta_disabled.tar
             vbmeta.img
