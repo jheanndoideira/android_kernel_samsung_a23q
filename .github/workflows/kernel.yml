@@ -38,22 +38,23 @@ jobs:
           cp -R wireguard-linux-compat/src drivers/net/wireguard
           echo "obj-y += wireguard/" >> drivers/net/Makefile
 
-      - name: Surgeon Fix V18 (The Final Repair)
+            - name: Build Untouchable (TOTAL: Performance + Fixes)
         run: |
-          ROOT=$(pwd)/kernel_source
-          ADR="$ROOT/techpack/audio/asoc/codecs/tas256x"
-          # Mapeamento físico de pastas para enganar o compilador
-          mkdir -p $ADR/os_layer/src/os_layer/inc
-          cp $ADR/os_layer/inc/*.h $ADR/os_layer/src/os_layer/inc/ 2>/dev/null || true
-          cp $ADR/physical_layer/inc/*.h $ADR/os_layer/src/os_layer/inc/ 2>/dev/null || true
-          # Fix Camera Trace
-          CAM="$ROOT/techpack/camera/drivers/cam_req_mgr"
-          mkdir -p $ROOT/techpack/camera/drivers/cam_utils
-          cp $CAM/*.h $ROOT/techpack/camera/drivers/cam_utils/ 2>/dev/null || true
-          # Desativar travas Samsung RKP direto no código
-          find $ROOT -name "Kconfig*" -exec sed -i 's/bool "Samsung RKP"/bool/g' {} +
-
-                # === O MOTOR DE PERFORMANCE (LTO + POLLY) ===
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
+          cd kernel_source
+          
+          # 1. Limpa e prepara
+          make vendor/a23_eur_open_defconfig
+          
+          # 2. [FIX] Previne travamento no menu de config
+          ./scripts/config --set-val CONFIG_KPROBES y
+          ./scripts/config --set-val CONFIG_JUMP_LABEL n
+          ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
+          ./scripts/config --disable CONFIG_LTO_NONE
+          
+          # 3. [SEU PEDIDO] MOTOR DE PERFORMANCE
           ./scripts/config --enable CONFIG_LTO_CLANG_FULL
           ./scripts/config --enable CONFIG_LLVM_POLLY
           ./scripts/config --enable CONFIG_HZ_300
@@ -61,20 +62,20 @@ jobs:
           ./scripts/config --enable CONFIG_TCP_CONG_BBR
           ./scripts/config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
           
-          # === FLUIDEZ, DISCO E VPN ===
+          # 4. [SEU PEDIDO] FLUIDEZ, DISCO E VPN
           ./scripts/config --enable CONFIG_IOSCHED_MAPLE
           ./scripts/config --set-str CONFIG_DEFAULT_IOSCHED "maple"
           ./scripts/config --enable CONFIG_DYNAMIC_FSYNC
           ./scripts/config --enable CONFIG_WIREGUARD
           
-          # === MEMÓRIA E ANDROID 16 ===
+          # 5. [SEU PEDIDO] MEMÓRIA E ANDROID 16
           ./scripts/config --enable CONFIG_ZRAM_DEF_COMP_ZSTD
           ./scripts/config --enable CONFIG_ZSMALLOC
           ./scripts/config --enable CONFIG_PSI
           ./scripts/config --enable CONFIG_BPF_JIT
-          ./scripts/config --enable CONFIG_OVERLAY_FS
+          ./scripts/config --enable CONFIG_OVERLAY_FS  # Necessário para alguns módulos
           
-          # === SEGURANÇA E COMPATIBILIDADE DE DRIVERS ===
+          # 6. [SEU PEDIDO] SEGURANÇA E ROOT
           ./scripts/config --enable CONFIG_KSU
           ./scripts/config --enable CONFIG_KSU_SUSFS
           ./scripts/config --enable CONFIG_KPROBES
@@ -85,22 +86,20 @@ jobs:
           ./scripts/config --disable CONFIG_TIMA
           ./scripts/config --disable CONFIG_SEC_RESTRICT_ROOTING
           
-          # [CORREÇÃO CRÍTICA] Desativa o que travou o log anterior
-          ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
-          
-          # [CORREÇÃO CRÍTICA] O "Sim" automático para não travar
+          # 7. [FIX CRÍTICO] O "Sim" automático (Sem isso trava no erro End of File)
           yes "" | make olddefconfig
           
-          # KCFLAGS - Headers incluídos explicitamente
-          AUDIO_INC="-I$(pwd)/techpack/audio/asoc/codecs/tas256x/physical_layer/inc -I$(pwd)/techpack/audio/asoc/codecs/tas256x/os_layer/inc"
-          
-          # [CORREÇÃO CRÍTICA] Adicionando caminhos da Câmera que faltavam
+          # 8. [FIX CRÍTICO] Caminhos de Áudio e Câmera (Sem isso dá erro de file not found)
+          TP_AUDIO="$(pwd)/techpack/audio/asoc/codecs/tas256x"
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
+          
+          AUDIO_INC="-I$TP_AUDIO/physical_layer/inc -I$TP_AUDIO/os_layer/inc"
+          # Adicionei cam_cci e req_mgr que estavam faltando no seu bloco
           CAM_INC="-I$TP_CAM/cam_cci -I$TP_CAM/cam_sensor_io -I$TP_CAM/cam_sensor_utils -I$(pwd)/techpack/camera/drivers/cam_req_mgr"
           
+          # 9. Compilação
           export KCFLAGS="-O3 -Ofast -w -pipe -march=armv8-a+crc+crypto -mllvm -polly -fno-builtin -fcommon $AUDIO_INC $CAM_INC"
           
-          # Compilação Final com LLD
           make -j$(nproc --all) \
               CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
               LLVM=1 LLVM_IAS=0 \
