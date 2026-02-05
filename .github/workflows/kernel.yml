@@ -1,4 +1,4 @@
-name: A23_Variant_A_Globalist
+name: A23_Variant_B_Surgeon
 on:
   workflow_dispatch:
 
@@ -25,20 +25,27 @@ jobs:
           git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
 
-      - name: Inject KernelSU Next & SUSFS
+      - name: Inject KSU & SUSFS
         run: |
           cd kernel_source
           git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
-          mv temp_ksu/kernel drivers/kernelsu
-          rm -rf temp_ksu
+          mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
           echo "obj-y += kernelsu/" >> drivers/Makefile
           sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-      - name: Build with Global Header Injection
+      - name: Code Surgery (The Surgeon)
+        run: |
+          cd kernel_source/techpack
+          echo "=== Removendo caminhos relativos de todos os headers de Áudio e Câmera ==="
+          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|physical_layer/inc/||g' {} +
+          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|logical_layer/inc/||g' {} +
+          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|algo/inc/||g' {} +
+          find . -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|os_layer/inc/||g' {} +
+
+      - name: Build with Surgeon Method
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           export ARCH=arm64
@@ -49,23 +56,15 @@ jobs:
           make clean && make mrproper
           make vendor/a23_eur_open_defconfig
           
-          # Configurações Extremas (LTO + Android 16)
           ./scripts/config --enable CONFIG_LTO_CLANG_FULL
-          ./scripts/config --disable CONFIG_LTO_NONE
-          ./scripts/config --enable CONFIG_KSU
-          ./scripts/config --enable CONFIG_KSU_SUSFS
           ./scripts/config --enable CONFIG_OVERLAY_FS
           ./scripts/config --enable CONFIG_BPF_SYSCALL
-          ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
           
           yes "" | make olddefconfig
           
-          # MÁGICA GLOBAL: Mapeia todas as pastas do techpack para o compilador
+          # Define apenas as raízes das pastas para o Surgeon buscar
           ADR="techpack/audio/asoc/codecs/tas256x"
-          CAM="techpack/camera/drivers"
-          EXT_INC="-I$(pwd)/$ADR/physical_layer/inc -I$(pwd)/$ADR/logical_layer/inc -I$(pwd)/$ADR/algo/inc -I$(pwd)/$ADR/os_layer/inc -I$(pwd)/$CAM/cam_sensor_module/cam_cci -I$(pwd)/$CAM/cam_req_mgr"
-          
-          export KCFLAGS="-O3 -w -fno-builtin -fcommon -pipe -march=armv8-a+crc+crypto $EXT_INC"
+          export KCFLAGS="-O3 -w -I$(pwd)/$ADR/physical_layer/inc -I$(pwd)/$ADR/logical_layer/inc -I$(pwd)/$ADR/algo/inc -I$(pwd)/$ADR/os_layer/inc"
           
           make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=0
 
@@ -77,7 +76,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-Globalist-Kernel
+          name: A23-Surgeon-Kernel
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
