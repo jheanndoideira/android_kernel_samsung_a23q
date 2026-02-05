@@ -1,4 +1,4 @@
-name: A23_Variant_I_DeepCleaner
+name: A23_Variant_F_HeaderHammer
 on:
   workflow_dispatch:
 
@@ -22,33 +22,40 @@ jobs:
           git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
 
-      - name: Deep Clean & Header Fix
+      - name: Create Header Hammer
         run: |
-          cd kernel_source
-          # Adiciona newline em todos os ficheiros de áudio para evitar erro de leitura
-          find techpack/audio/ -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '$a\' {} \;
-          
-          # Fix Display
-          cd techpack/display/pll
-          sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
+          ROOT=$(pwd)/kernel_source
+          mkdir -p $ROOT/fixed_headers
+          # Copia todos os .h do techpack para uma pasta central
+          find $ROOT/techpack -name "*.h" -exec cp {} $ROOT/fixed_headers/ \;
+          # Cria a estrutura fake que o áudio pede
+          mkdir -p $ROOT/fixed_headers/physical_layer/inc
+          cp $ROOT/fixed_headers/*.h $ROOT/fixed_headers/physical_layer/inc/
 
-      - name: Build with Compatibility Focus
+      - name: Build with Hammer
         run: |
-          export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
+          # DEFINE AS VARIÁVEIS LÍDERES (O QUE FALTOU ANTES)
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
           export CLANG_TRIPLE=aarch64-linux-gnu-
-          cd kernel_source
+          export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           
+          cd kernel_source
+          make clean && make mrproper
+          
+          # AGORA ELE VAI ACHAR A PASTA CERTA
           make vendor/a23_eur_open_defconfig
+          
           ./scripts/config --enable CONFIG_LTO_CLANG_FULL
           ./scripts/config --enable CONFIG_OVERLAY_FS
           ./scripts/config --enable CONFIG_BPF_SYSCALL
           
           yes "" | make olddefconfig
           
-          # LLVM_IAS=0 usa o montador mais compatível para drivers Samsung antigos
-          make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=0 KCFLAGS="-O3 -w -fcommon"
+          # Aponta para a pasta central de headers
+          export KCFLAGS="-O3 -w -I$(pwd)/../fixed_headers"
+          
+          make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=0
 
       - name: Create VBMeta
         run: |
@@ -58,7 +65,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: A23-DeepCleaner-Kernel
+          name: A23-HeaderHammer-Kernel
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
