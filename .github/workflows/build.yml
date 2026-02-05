@@ -1,4 +1,4 @@
-name: A23_V27_FINAL_SURGERY
+name: A23_ULTIMATE_FUSION_V2
 on:
   workflow_dispatch:
 
@@ -6,145 +6,116 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: "Checkout Source"
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           repository: potatogeek/kernel-a235m-f
           path: kernel_source
+          fetch-depth: 1
 
-      - name: "Setup Environment"
+      - name: "Setup Environment (Clang 15)"
         run: |
-          sudo apt update -y
-          sudo apt install bc cpio flex bison git gcc g++ tar perl curl libc++-dev lz4 libssl-dev python3 python2 device-tree-compiler -y
-          sudo ln -sf /usr/bin/python2 /usr/bin/python
-          mkdir toolchains && cd toolchains
-          # Usando Clang Azure (Neutron) - Mais robusto
-          git clone --depth=1 https://github.com/Neutron-Clang/neutron-clang clang
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
+          sudo apt update
+          sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi build-essential libssl-dev bison flex device-tree-compiler python3
 
-      - name: "Inject Root, WireGuard & Fixes"
+      - name: "Inject KSU Next, SUSFS & WireGuard"
         run: |
           cd kernel_source
+          
           # 1. KernelSU Next
           git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
           mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
           
-          # --- FIXES DO KERNELSU ---
-          # Fix 1: TWA Resume
+          # Fix KSU Compatibilidade
           sed -i 's/TWA_RESUME/1/g' drivers/kernelsu/allowlist.c
-          
-          # Fix 2: Filter Count (Erro anterior)
           sed -i 's/atomic_set(&current->seccomp.filter_count, 0);/\/\/ atomic_set(&current->seccomp.filter_count, 0);/g' drivers/kernelsu/app_profile.c
           
-          # [FIX NOVO] Fix 3: handle_inode_event -> handle_event
-          # O erro dizia: "did you mean 'handle_event'?" -> Sim, nós queremos!
-          sed -i 's/.handle_inode_event = ksu_handle_inode_event,/.handle_event = ksu_handle_inode_event,/g' drivers/kernelsu/pkg_observer.c
-          
-          # Instalação padrão
           echo "obj-y += kernelsu/" >> drivers/Makefile
           sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           
-          # Fix pgtable.h
+          # Fix pgtable
           echo "#include <asm/pgtable.h>" > include/linux/pgtable.h
 
-          # 2. SUSFS & WireGuard
+          # 2. SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-          
+
+          # 3. WireGuard
           git clone --depth 1 https://github.com/WireGuard/wireguard-linux-compat.git
           cp -R wireguard-linux-compat/src drivers/net/wireguard
           echo "obj-y += wireguard/" >> drivers/net/Makefile
 
-      - name: "Surgeon Fix V27 (Audio Logic & Physical)"
+      - name: "Apply Critical Patches (From Working Script)"
         run: |
-          ROOT=$(pwd)/kernel_source
-          TAS_PATH="$ROOT/techpack/audio/asoc/codecs/tas256x"
-          DEST_SRC="$TAS_PATH/os_layer/src"
-          
-          # [FIX ANTIGO] Copia physical_layer (Funcionou)
-          cp -r "$TAS_PATH/physical_layer" "$DEST_SRC/" 2>/dev/null || true
-          
-          # [FIX NOVO] Copia logical_layer (O erro atual)
-          # O código pede "logical_layer/inc/tas256x-logic.h"
-          # Então copiamos a pasta logical_layer para dentro de os_layer/src
-          cp -r "$TAS_PATH/logical_layer" "$DEST_SRC/" 2>/dev/null || true
-          
-          # Garante headers na pasta global também (Cinto e suspensório)
-          cp "$TAS_PATH/physical_layer/inc/"*.h $ROOT/include/linux/ 2>/dev/null || true
-          cp "$TAS_PATH/logical_layer/inc/"*.h $ROOT/include/linux/ 2>/dev/null || true
-          
-          # Fix Display PLL
-          cp $ROOT/techpack/display/pll/*.h $ROOT/include/linux/ 2>/dev/null || true
-          
-          # Desativa RKP
-          find $ROOT -name "Kconfig*" -exec sed -i 's/bool "Samsung RKP"/bool/g' {} +
-
-      - name: "Build V27 (All Flags + Fixes)"
-        run: |
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-android-
-          export PATH=$(pwd)/toolchains/clang/bin:$(pwd)/toolchains/google/bin:$PATH
           cd kernel_source
-          
-          make vendor/a23_eur_open_defconfig
-          
-          # --- CONFIGS ANTI-TRAVAMENTO ---
-          ./scripts/config --disable CONFIG_RELR
-          ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
-          ./scripts/config --set-val CONFIG_INIT_STACK_ALL_ZERO y
-          ./scripts/config --set-val CONFIG_KPROBES y
-          ./scripts/config --disable CONFIG_LTO_NONE
-          ./scripts/config --disable CONFIG_WERROR
-          
-          # --- PERFORMANCE (SUA LISTA) ---
-          ./scripts/config --enable CONFIG_LTO_CLANG_FULL
-          ./scripts/config --enable CONFIG_LLVM_POLLY
-          ./scripts/config --enable CONFIG_HZ_300
-          ./scripts/config --enable CONFIG_PREEMPT
-          ./scripts/config --enable CONFIG_TCP_CONG_BBR
-          ./scripts/config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
-          ./scripts/config --enable CONFIG_IOSCHED_MAPLE
-          ./scripts/config --set-str CONFIG_DEFAULT_IOSCHED "maple"
-          ./scripts/config --enable CONFIG_DYNAMIC_FSYNC
-          ./scripts/config --enable CONFIG_WIREGUARD
-          
-          # --- ANDROID 16 & KSU ---
-          ./scripts/config --enable CONFIG_ZRAM_DEF_COMP_ZSTD
-          ./scripts/config --enable CONFIG_ZSMALLOC
-          ./scripts/config --enable CONFIG_PSI
-          ./scripts/config --enable CONFIG_BPF_JIT
-          ./scripts/config --enable CONFIG_OVERLAY_FS
-          ./scripts/config --enable CONFIG_KSU
-          ./scripts/config --enable CONFIG_KSU_SUSFS
-          ./scripts/config --disable CONFIG_RKP_KDP
-          ./scripts/config --disable CONFIG_TIMA
-          ./scripts/config --disable CONFIG_SEC_RESTRICT_ROOTING
+          sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
+          sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
+          cp -r techpack/audio/asoc/codecs/tas256x/physical_layer/inc/*.h include/linux/ 2>/dev/null || true
 
-          # Aceita tudo
-          yes "" | make olddefconfig
+      - name: "Configure & Optimize"
+        run: |
+          cd kernel_source
+          mkdir -p out
+          make O=out rsuntk_defconfig
+
+          # --- OTIMIZAÇÕES ---
+          scripts/config --file out/.config --enable CONFIG_LTO_CLANG_FULL
+          scripts/config --file out/.config --enable CONFIG_LLVM_POLLY
+          scripts/config --file out/.config --enable CONFIG_HZ_300
+          scripts/config --file out/.config --enable CONFIG_PREEMPT
+          scripts/config --file out/.config --enable CONFIG_TCP_CONG_BBR
+          scripts/config --file out/.config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
+          scripts/config --file out/.config --enable CONFIG_IOSCHED_MAPLE
+          scripts/config --file out/.config --set-str CONFIG_DEFAULT_IOSCHED "maple"
           
-          # --- INCLUDES NA MARRA ---
+          # --- FEATURES ---
+          scripts/config --file out/.config --enable CONFIG_ZRAM_DEF_COMP_ZSTD
+          scripts/config --file out/.config --enable CONFIG_ZSMALLOC
+          scripts/config --file out/.config --enable CONFIG_PSI
+          scripts/config --file out/.config --enable CONFIG_BPF_JIT
+          scripts/config --file out/.config --enable CONFIG_KSU
+          scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
+          scripts/config --file out/.config --enable CONFIG_WIREGUARD
+
+          # --- FIXES ---
+          scripts/config --file out/.config --enable SECTION_MISMATCH_WARN_ONLY
+          scripts/config --file out/.config --disable REFCOUNT_FULL
+          scripts/config --file out/.config --disable PANIC_ON_REFCOUNT_ERROR
+          scripts/config --file out/.config --disable SHADOW_CALL_STACK
+          scripts/config --file out/.config --disable RELR
+          scripts/config --file out/.config --disable CONFIG_RKP_KDP
+          scripts/config --file out/.config --disable CONFIG_TIMA
+          scripts/config --file out/.config --disable CONFIG_SEC_RESTRICT_ROOTING
+          
+          yes "" | make O=out olddefconfig
+
+      - name: "Compile (Fusion)"
+        run: |
+          cd kernel_source
           TP_PLL="-I$(pwd)/techpack/display/pll"
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
           CAM_INC="-I$TP_CAM/cam_cci -I$TP_CAM/cam_sensor_io -I$TP_CAM/cam_sensor_utils -I$(pwd)/techpack/camera/drivers/cam_req_mgr"
+          export KCFLAGS="-O3 -Ofast -w -Wno-error -fno-builtin -fcommon $TP_PLL $CAM_INC"
           
-          # IGNORANCIA SUPREMA (-k e -Wno-error)
-          export KCFLAGS="-O3 -Ofast -w -Wno-error -pipe -march=armv8-a+crc+crypto -mllvm -polly -fno-builtin -fcommon $TP_PLL $CAM_INC"
-          export KCPPFLAGS="-Wno-error"
+          yes "" | make -j$(nproc --all) O=out \
+          CC=clang-15 LD=ld.lld-15 AR=llvm-ar-15 NM=llvm-nm-15 \
+          LLVM_IAS=0 \
+          DTC_FLAGS="-@" \
+          KBUILD_MODPOST_WARN=1 \
+          CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
+          dtbo.img Image.gz-dtb
+
+      - name: "Generate VBMeta (Disabled)"
+        run: |
+          # Baixa a ferramenta oficial da Google
+          curl -LO https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
+          chmod +x avbtool.py
           
-          make -j$(nproc --all) -k \
-              CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
-              LLVM=1 LLVM_IAS=1 \
-              DTC_FLAGS="-@" \
-              Image.gz-dtb || true
+          # Cria um vbmeta vazio (flags 2 = disable verification)
+          ./avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta.img
           
-          if [ -f arch/arm64/boot/Image.gz-dtb ]; then
-              echo "✅ KERNEL COMPILADO! GLÓRIA A DEUS!"
-          else
-              echo "❌ FALHA: Arquivo não gerado."
-              exit 1
-          fi
+          # Empacota em TAR para o Odin (Samsung adora .tar)
+          tar -cvf vbmeta_disabled.tar vbmeta.img
 
       - name: "Package ZIP (AnyKernel3)"
         run: |
@@ -152,12 +123,25 @@ jobs:
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
           sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.1/by-name/boot;|block=/dev/block/by-name/boot;|g' AnyKernel3/anykernel.sh
           
-          cp kernel_source/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
+          # Copia Kernel
+          if [ -f kernel_source/out/arch/arm64/boot/Image.gz-dtb ]; then
+            cp kernel_source/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
+          else
+             cp kernel_source/out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
+          fi
           
-          cd AnyKernel3 && zip -r9 ../A23-V27-FINAL.zip *
+          # Copia DTBO
+          if [ -f kernel_source/out/arch/arm64/boot/dtbo.img ]; then
+            cp kernel_source/out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
+          fi
+          
+          cd AnyKernel3 && zip -r9 ../A23-ULTIMATE-FUSION-V2.zip *
 
-      - name: "Upload Release"
+      - name: "Upload Artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: A23-V27-FINAL-PACKAGE
-          path: A23-V27-FINAL.zip
+          name: A23_ULTIMATE_FUSION_V2
+          path: |
+            A23-ULTIMATE-FUSION-V2.zip
+            vbmeta_disabled.tar
+            vbmeta.img
