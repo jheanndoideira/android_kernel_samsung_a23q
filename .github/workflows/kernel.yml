@@ -1,4 +1,4 @@
-name: A23_ULTIMATE_MANIFESTO_A16
+name: A23_SUPER_ELITE_FINAL
 on:
   workflow_dispatch:
 
@@ -24,18 +24,18 @@ jobs:
       - name: Inject Root & Performance DNA
         run: |
           cd kernel_source
-          # KernelSU Next
+          # KernelSU Next & SUSFS (Root Invisível)
           git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
           mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
           echo "obj-y += kernelsu/" >> drivers/Makefile
           sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          # SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
       - name: The Surgeon Fix (Audio/Camera/Display)
         run: |
+          # Limpeza de caminhos do Techpack
           cd kernel_source/techpack/audio/asoc/codecs/tas256x
           find . -type f -name "*.[ch]" -exec sed -i 's|physical_layer/inc/||g' {} +
           find . -type f -name "*.[ch]" -exec sed -i 's|logical_layer/inc/||g' {} +
@@ -43,7 +43,7 @@ jobs:
           cd ../../../../display/pll
           sed -i 's|#define TRACE_INCLUDE_PATH .|#define TRACE_INCLUDE_PATH ../../techpack/display/pll|g' pll_trace.h
 
-      - name: Extreme Build (Flags de Performance Totais)
+      - name: Elite Build (Performance & Android 16)
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
@@ -52,37 +52,47 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # === O MOTOR DE PERFORMANCE ===
+          # === TUNING DE PERFORMANCE E REDE ===
           ./scripts/config --enable CONFIG_LTO_CLANG_FULL
           ./scripts/config --enable CONFIG_HZ_300
-          ./scripts/config --enable CONFIG_PREEMPT
+          ./scripts/config --enable CONFIG_TCP_CONG_BBR
+          ./scripts/config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
+          ./scripts/config --enable CONFIG_ZRAM
+          ./scripts/config --enable CONFIG_ZSMALLOC
+          ./scripts/config --enable CONFIG_ZRAM_WRITEBACK
+          
+          # === ANDROID 16 & ROOT ===
           ./scripts/config --enable CONFIG_OVERLAY_FS
           ./scripts/config --enable CONFIG_BPF_SYSCALL
           ./scripts/config --enable CONFIG_KSU
           ./scripts/config --enable CONFIG_KSU_SUSFS
           ./scripts/config --enable CONFIG_IP_NF_TARGET_TTL
-          ./scripts/config --enable CONFIG_JUMP_LABEL
           ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
-          ./scripts/config --disable CONFIG_DEBUG_KERNEL
+          
+          # === LIMPEZA DE LOGS (MAIS VELOCIDADE) ===
+          ./scripts/config --disable CONFIG_DEBUG_MISC
+          ./scripts/config --disable CONFIG_SAMSUNG_DEBUG_LOG
           
           yes "" | make olddefconfig
           
-          # === AS FLAGS QUE VOCÊ SENTIU FALTA ===
-          # -O3: Velocidade máxima
-          # -march: Otimização para o chip do A23
-          # -fcommon/fno-builtin: Estabilidade para drivers antigos
+          # Flags de Compilação de Elite
           ADR="techpack/audio/asoc/codecs/tas256x"
           export KCFLAGS="-O3 -Ofast -w -pipe -march=armv8-a+crc+crypto -fno-builtin -fcommon -I$(pwd)/$ADR/physical_layer/inc -I$(pwd)/$ADR/logical_layer/inc"
           
-          make -j$(nproc --all) CC=clang CROSS_COMPILE=aarch64-linux-android- LLVM=1 LLVM_IAS=0
+          make -j$(nproc --all) \
+              CC=clang \
+              CROSS_COMPILE=aarch64-linux-android- \
+              CLANG_TRIPLE=aarch64-linux-gnu- \
+              LLVM=1 \
+              LLVM_IAS=0
 
-      - name: Finalize Artifacts
+      - name: Create Artifacts
         run: |
-          wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
+          wget https://raw.githubusercontent.com/external-avb/avb-master/avbtool.py || wget https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
       - uses: actions/upload-artifact@v4
         with:
-          name: A23-MANIFESTO-FINAL
+          name: A23-SUPER-ELITE-KERNEL
           path: |
             kernel_source/arch/arm64/boot/Image
             vbmeta_disabled.img
