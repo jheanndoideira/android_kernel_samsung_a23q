@@ -1,4 +1,4 @@
-name: A23_V32_THE_FINISHER
+name: A23_V33_SILENT_ASSASSIN
 on:
   workflow_dispatch:
 
@@ -6,20 +6,30 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: "Checkout YOUR Repo"
+      - name: "🔥 1. Turbo Disk Cleanup (2 min)"
+        run: |
+          echo "Limpando lixo do GitHub Actions para liberar espaço..."
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          docker image prune --all --force
+          echo "Espaço liberado!"
+
+      - name: "2. Checkout YOUR Repo"
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: "Setup Environment (Clang 15)"
+      - name: "3. Setup Environment (Clang 15)"
         run: |
           sudo apt update
           sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi build-essential libssl-dev bison flex device-tree-compiler python3 python2
           sudo ln -sf /usr/bin/python2 /usr/bin/python
 
-      - name: "Inject KSU Next, SUSFS & WireGuard"
+      - name: "4. Inject KSU Next, SUSFS & WireGuard"
         run: |
-          # 1. KernelSU Next
+          # KernelSU Next
           git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
           mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
           sed -i 's/TWA_RESUME/1/g' drivers/kernelsu/allowlist.c
@@ -28,36 +38,35 @@ jobs:
           sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           echo "#include <asm/pgtable.h>" > include/linux/pgtable.h
 
-          # 2. SUSFS
+          # SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-          # 3. WireGuard
+          # WireGuard
           git clone --depth 1 https://github.com/WireGuard/wireguard-linux-compat.git
           cp -R wireguard-linux-compat/src drivers/net/wireguard
           echo "obj-y += wireguard/" >> drivers/net/Makefile
 
-      - name: "Apply Critical Patches & Fixes"
+      - name: "5. Apply Patches & Python Fix"
         run: |
+          # Patches do seu script original
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
           
-          # Fix Python 3 Print Syntax
+          # Fix Python 3 Print Syntax (Obrigatório)
           sed -i 's/print "error, forbidden warning:", m.group(2)/print("error, forbidden warning:", m.group(2))/g' scripts/gcc-wrapper.py
           sed -i 's/print "warning, allowed warning:", m.group(2)/print("warning, allowed warning:", m.group(2))/g' scripts/gcc-wrapper.py
           
-          # Fix Audio Headers
+          # Fix Headers
           cp -r techpack/audio/asoc/codecs/tas256x/physical_layer/inc/*.h include/linux/ 2>/dev/null || true
 
-      - name: "Configure & Optimize (Aggressive Mode)"
+      - name: "6. Configure & Optimize"
         run: |
           mkdir -p out
           make O=out ARCH=arm64 rsuntk_defconfig
 
-          # --- OTIMIZAÇÕES (Forçando via scripts/config) ---
-          ./scripts/config --file out/.config --enable CONFIG_KPROBES
-          ./scripts/config --file out/.config --disable CONFIG_LTO_NONE
+          # --- OTIMIZAÇÕES ---
           ./scripts/config --file out/.config --enable CONFIG_LTO_CLANG_FULL
           ./scripts/config --file out/.config --enable CONFIG_LLVM_POLLY
           ./scripts/config --file out/.config --enable CONFIG_HZ_300
@@ -67,7 +76,7 @@ jobs:
           ./scripts/config --file out/.config --enable CONFIG_IOSCHED_MAPLE
           ./scripts/config --file out/.config --set-str CONFIG_DEFAULT_IOSCHED "maple"
           
-          # --- ANDROID 16 & KSU ---
+          # --- FEATURES ---
           ./scripts/config --file out/.config --enable CONFIG_ZRAM_DEF_COMP_ZSTD
           ./scripts/config --file out/.config --enable CONFIG_ZSMALLOC
           ./scripts/config --file out/.config --enable CONFIG_PSI
@@ -76,7 +85,7 @@ jobs:
           ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
           ./scripts/config --file out/.config --enable CONFIG_WIREGUARD
 
-          # --- SEGURANÇA & ERROS ---
+          # --- FIXES ---
           ./scripts/config --file out/.config --enable SECTION_MISMATCH_WARN_ONLY
           ./scripts/config --file out/.config --disable REFCOUNT_FULL
           ./scripts/config --file out/.config --disable PANIC_ON_REFCOUNT_ERROR
@@ -85,10 +94,10 @@ jobs:
           ./scripts/config --file out/.config --disable CONFIG_RKP_KDP
           ./scripts/config --file out/.config --disable CONFIG_TIMA
           
-          # Responde 'Sim' para tudo que sobrar
+          # AQUI USAMOS O YES APENAS NA CONFIGURAÇÃO (Seguro)
           yes "" | make O=out ARCH=arm64 olddefconfig
 
-      - name: "Compile (Targets: Image.gz-dtb + dtbs)"
+      - name: "7. Compile (NO YES COMMAND)"
         run: |
           TP_PLL="-I$(pwd)/techpack/display/pll"
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
@@ -96,10 +105,11 @@ jobs:
           
           export KCFLAGS="-O3 -Ofast -w -Wno-error -fno-builtin -fcommon $TP_PLL $CAM_INC"
           
-          echo "--- COMPILANDO ---"
+          echo "--- COMPILANDO SEM LOOP INFINITO ---"
           
-          # Removi dtbo.img (que deu erro) e coloquei dtbs
-          yes "" | make -j$(nproc --all) O=out \
+          # REMOVI O 'yes "" |' DAQUI. 
+          # Se der erro, ele vai parar e mostrar o erro real.
+          make -j$(nproc --all) O=out \
           ARCH=arm64 \
           CC=clang-15 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -110,37 +120,35 @@ jobs:
           DTC_FLAGS="-@" \
           KBUILD_MODPOST_WARN=1 \
           CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
-          Image.gz-dtb dtbs
+          dtbs Image.gz-dtb
 
-      - name: "Generate VBMeta"
+      - name: "8. Generate VBMeta"
         run: |
           curl -LO https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
           tar -cvf vbmeta_disabled.tar vbmeta_disabled.img
 
-      - name: "Package Master ZIP (AnyKernel3)"
+      - name: "9. Package ZIP"
         run: |
           git clone https://github.com/osm0sis/AnyKernel3
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
           sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.1/by-name/boot;|block=/dev/block/by-name/boot;|g' AnyKernel3/anykernel.sh
           
-          # Copia Kernel
           if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
             cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
           else
             cp out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
           fi
           
-          # [DTBO FIX] Procura por arquivos .dtbo e coloca no ZIP
-          # O AnyKernel3 vai cuidar de aplicar se encontrar o arquivo
+          # Pega todos os DTBOs gerados
           find out/arch/arm64/boot/dts/ -name "*.dtbo" -exec cp {} AnyKernel3/ \; || true
           
-          cd AnyKernel3 && zip -r9 ../A23-FINAL-TURBO.zip *
+          cd AnyKernel3 && zip -r9 ../A23-V33-SILENT.zip *
 
       - name: "Upload Artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: A23_TURBO_FINAL
+          name: A23_V33_SILENT
           path: |
-            A23-FINAL-TURBO.zip
+            A23-V33-SILENT.zip
             vbmeta_disabled.tar
