@@ -1,4 +1,4 @@
-name: A23_V33_SILENT_ASSASSIN
+name: A23_V33_1_PERFECT_STORM
 on:
   workflow_dispatch:
 
@@ -8,13 +8,11 @@ jobs:
     steps:
       - name: "🔥 1. Turbo Disk Cleanup (2 min)"
         run: |
-          echo "Limpando lixo do GitHub Actions para liberar espaço..."
+          echo "Limpando lixo do GitHub Actions..."
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
           docker image prune --all --force
-          echo "Espaço liberado!"
 
       - name: "2. Checkout YOUR Repo"
         uses: actions/checkout@v4
@@ -38,28 +36,28 @@ jobs:
           sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           echo "#include <asm/pgtable.h>" > include/linux/pgtable.h
 
-          # SUSFS
+          # SUSFS & WireGuard
           git clone https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-
-          # WireGuard
+          
           git clone --depth 1 https://github.com/WireGuard/wireguard-linux-compat.git
           cp -R wireguard-linux-compat/src drivers/net/wireguard
           echo "obj-y += wireguard/" >> drivers/net/Makefile
 
       - name: "5. Apply Patches & Python Fix"
         run: |
-          # Patches do seu script original
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
           
-          # Fix Python 3 Print Syntax (Obrigatório)
+          # Fix Python 3 Print Syntax
           sed -i 's/print "error, forbidden warning:", m.group(2)/print("error, forbidden warning:", m.group(2))/g' scripts/gcc-wrapper.py
           sed -i 's/print "warning, allowed warning:", m.group(2)/print("warning, allowed warning:", m.group(2))/g' scripts/gcc-wrapper.py
           
-          # Fix Headers
+          # Fix Audio Headers (Physical & Logical)
           cp -r techpack/audio/asoc/codecs/tas256x/physical_layer/inc/*.h include/linux/ 2>/dev/null || true
+          # [ADICIONADO] Garante que a lógica também esteja lá
+          cp -r techpack/audio/asoc/codecs/tas256x/logical_layer/inc/*.h include/linux/ 2>/dev/null || true
 
       - name: "6. Configure & Optimize"
         run: |
@@ -94,10 +92,9 @@ jobs:
           ./scripts/config --file out/.config --disable CONFIG_RKP_KDP
           ./scripts/config --file out/.config --disable CONFIG_TIMA
           
-          # AQUI USAMOS O YES APENAS NA CONFIGURAÇÃO (Seguro)
           yes "" | make O=out ARCH=arm64 olddefconfig
 
-      - name: "7. Compile (NO YES COMMAND)"
+      - name: "7. Compile (HOSTCFLAGS ADDED)"
         run: |
           TP_PLL="-I$(pwd)/techpack/display/pll"
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
@@ -105,10 +102,9 @@ jobs:
           
           export KCFLAGS="-O3 -Ofast -w -Wno-error -fno-builtin -fcommon $TP_PLL $CAM_INC"
           
-          echo "--- COMPILANDO SEM LOOP INFINITO ---"
+          echo "--- COMPILANDO ---"
           
-          # REMOVI O 'yes "" |' DAQUI. 
-          # Se der erro, ele vai parar e mostrar o erro real.
+          # [FIX] Adicionei HOSTCFLAGS="-w" para o erro do OpenSSL/sign-file
           make -j$(nproc --all) O=out \
           ARCH=arm64 \
           CC=clang-15 \
@@ -118,6 +114,7 @@ jobs:
           LD=ld.lld-15 AR=llvm-ar-15 NM=llvm-nm-15 \
           LLVM_IAS=0 \
           DTC_FLAGS="-@" \
+          HOSTCFLAGS="-w" \
           KBUILD_MODPOST_WARN=1 \
           CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
           dtbs Image.gz-dtb
@@ -140,15 +137,14 @@ jobs:
             cp out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
           fi
           
-          # Pega todos os DTBOs gerados
           find out/arch/arm64/boot/dts/ -name "*.dtbo" -exec cp {} AnyKernel3/ \; || true
           
-          cd AnyKernel3 && zip -r9 ../A23-V33-SILENT.zip *
+          cd AnyKernel3 && zip -r9 ../A23-V33-PERFECT.zip *
 
       - name: "Upload Artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: A23_V33_SILENT
+          name: A23_V33_PERFECT
           path: |
-            A23-V33-SILENT.zip
+            A23-V33-PERFECT.zip
             vbmeta_disabled.tar
