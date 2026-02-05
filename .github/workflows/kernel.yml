@@ -1,26 +1,10 @@
-name: A23_NIGHT_MATRIX_9_WAYS
+name: A23_V27_FINAL_SURGERY
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build ${{ matrix.variant }}
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: [
-          V25_FULL_POWER,
-          V25_NO_LTO,
-          V25_NO_POLLY,
-          V25_FORCE_IGNORE,
-          V25_NO_WG_SUSFS,
-          V25_NO_WERROR,
-          V25_STD_KSU,
-          V25_O2_SAFE,
-          V25_MINIMAL
-        ]
-
     steps:
       - name: "Checkout Source"
         uses: actions/checkout@v4
@@ -34,57 +18,69 @@ jobs:
           sudo apt install bc cpio flex bison git gcc g++ tar perl curl libc++-dev lz4 libssl-dev python3 python2 device-tree-compiler -y
           sudo ln -sf /usr/bin/python2 /usr/bin/python
           mkdir toolchains && cd toolchains
-          git clone --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b1.git clang
+          # Usando Clang Azure (Neutron) - Mais robusto
+          git clone --depth=1 https://github.com/Neutron-Clang/neutron-clang clang
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 google
 
-      - name: "Inject Root & Fixes (Base for ALL)"
+      - name: "Inject Root, WireGuard & Fixes"
         run: |
           cd kernel_source
+          # 1. KernelSU Next
+          git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
+          mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
           
-          # --- LÓGICA DO KERNELSU (NEXT OU STD) ---
-          if [[ "${{ matrix.variant }}" == "V25_STD_KSU" ]]; then
-             echo "Usando KernelSU Padrão..."
-             curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
-          else
-             echo "Usando KernelSU Next..."
-             git clone --depth 1 https://github.com/rifsxd/KernelSU-Next temp_ksu
-             mv temp_ksu/kernel drivers/kernelsu && rm -rf temp_ksu
-             sed -i 's/TWA_RESUME/1/g' drivers/kernelsu/allowlist.c
-             echo "obj-y += kernelsu/" >> drivers/Makefile
-             sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-             # Fix erro filter_count
-             sed -i 's/atomic_set(&current->seccomp.filter_count, 0);/\/\/ atomic_set(&current->seccomp.filter_count, 0);/g' drivers/kernelsu/app_profile.c
-          fi
-
-          # Fix pgtable.h (Nuclear Fix)
+          # --- FIXES DO KERNELSU ---
+          # Fix 1: TWA Resume
+          sed -i 's/TWA_RESUME/1/g' drivers/kernelsu/allowlist.c
+          
+          # Fix 2: Filter Count (Erro anterior)
+          sed -i 's/atomic_set(&current->seccomp.filter_count, 0);/\/\/ atomic_set(&current->seccomp.filter_count, 0);/g' drivers/kernelsu/app_profile.c
+          
+          # [FIX NOVO] Fix 3: handle_inode_event -> handle_event
+          # O erro dizia: "did you mean 'handle_event'?" -> Sim, nós queremos!
+          sed -i 's/.handle_inode_event = ksu_handle_inode_event,/.handle_event = ksu_handle_inode_event,/g' drivers/kernelsu/pkg_observer.c
+          
+          # Instalação padrão
+          echo "obj-y += kernelsu/" >> drivers/Makefile
+          sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          
+          # Fix pgtable.h
           echo "#include <asm/pgtable.h>" > include/linux/pgtable.h
 
-          # --- LÓGICA DO SUSFS/WIREGUARD ---
-          if [[ "${{ matrix.variant }}" != "V25_NO_WG_SUSFS" ]]; then
-             # SUSFS
-             git clone https://gitlab.com/simonpunk/susfs4ksu.git
-             cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-             patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
-             # WireGuard
-             git clone --depth 1 https://github.com/WireGuard/wireguard-linux-compat.git
-             cp -R wireguard-linux-compat/src drivers/net/wireguard
-             echo "obj-y += wireguard/" >> drivers/net/Makefile
-          fi
+          # 2. SUSFS & WireGuard
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/ && cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
+          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+          
+          git clone --depth 1 https://github.com/WireGuard/wireguard-linux-compat.git
+          cp -R wireguard-linux-compat/src drivers/net/wireguard
+          echo "obj-y += wireguard/" >> drivers/net/Makefile
 
-      - name: "Surgeon Fix (Audio/Display/Cam)"
+      - name: "Surgeon Fix V27 (Audio Logic & Physical)"
         run: |
           ROOT=$(pwd)/kernel_source
+          TAS_PATH="$ROOT/techpack/audio/asoc/codecs/tas256x"
+          DEST_SRC="$TAS_PATH/os_layer/src"
           
-          # FIX AUDIO (Cópia Brutal)
-          SRC_DIR="$ROOT/techpack/audio/asoc/codecs/tas256x/physical_layer"
-          DEST_DIR="$ROOT/techpack/audio/asoc/codecs/tas256x/os_layer/src"
-          cp -r $SRC_DIR $DEST_DIR/ 2>/dev/null || true
-          cp $SRC_DIR/inc/*.h $ROOT/include/linux/ 2>/dev/null || true
+          # [FIX ANTIGO] Copia physical_layer (Funcionou)
+          cp -r "$TAS_PATH/physical_layer" "$DEST_SRC/" 2>/dev/null || true
           
-          # Desativa travas Samsung
+          # [FIX NOVO] Copia logical_layer (O erro atual)
+          # O código pede "logical_layer/inc/tas256x-logic.h"
+          # Então copiamos a pasta logical_layer para dentro de os_layer/src
+          cp -r "$TAS_PATH/logical_layer" "$DEST_SRC/" 2>/dev/null || true
+          
+          # Garante headers na pasta global também (Cinto e suspensório)
+          cp "$TAS_PATH/physical_layer/inc/"*.h $ROOT/include/linux/ 2>/dev/null || true
+          cp "$TAS_PATH/logical_layer/inc/"*.h $ROOT/include/linux/ 2>/dev/null || true
+          
+          # Fix Display PLL
+          cp $ROOT/techpack/display/pll/*.h $ROOT/include/linux/ 2>/dev/null || true
+          
+          # Desativa RKP
           find $ROOT -name "Kconfig*" -exec sed -i 's/bool "Samsung RKP"/bool/g' {} +
 
-      - name: "Config & Build Strategy"
+      - name: "Build V27 (All Flags + Fixes)"
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-android-
@@ -93,100 +89,75 @@ jobs:
           
           make vendor/a23_eur_open_defconfig
           
-          # Configs BASE (Anti-Travamento)
+          # --- CONFIGS ANTI-TRAVAMENTO ---
           ./scripts/config --disable CONFIG_RELR
           ./scripts/config --disable CONFIG_SHADOW_CALL_STACK
           ./scripts/config --set-val CONFIG_INIT_STACK_ALL_ZERO y
           ./scripts/config --set-val CONFIG_KPROBES y
           ./scripts/config --disable CONFIG_LTO_NONE
+          ./scripts/config --disable CONFIG_WERROR
           
-          # --- VARIAÇÕES DA MATRIX ---
+          # --- PERFORMANCE (SUA LISTA) ---
+          ./scripts/config --enable CONFIG_LTO_CLANG_FULL
+          ./scripts/config --enable CONFIG_LLVM_POLLY
+          ./scripts/config --enable CONFIG_HZ_300
+          ./scripts/config --enable CONFIG_PREEMPT
+          ./scripts/config --enable CONFIG_TCP_CONG_BBR
+          ./scripts/config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
+          ./scripts/config --enable CONFIG_IOSCHED_MAPLE
+          ./scripts/config --set-str CONFIG_DEFAULT_IOSCHED "maple"
+          ./scripts/config --enable CONFIG_DYNAMIC_FSYNC
+          ./scripts/config --enable CONFIG_WIREGUARD
           
-          # Performance Base (LTO/Polly)
-          if [[ "${{ matrix.variant }}" != "V25_NO_LTO" && "${{ matrix.variant }}" != "V25_MINIMAL" ]]; then
-             ./scripts/config --enable CONFIG_LTO_CLANG_FULL
-          fi
-          
-          if [[ "${{ matrix.variant }}" != "V25_NO_POLLY" && "${{ matrix.variant }}" != "V25_MINIMAL" ]]; then
-             ./scripts/config --enable CONFIG_LLVM_POLLY
-          fi
-          
-          # Flags Gerais
-          if [[ "${{ matrix.variant }}" != "V25_MINIMAL" ]]; then
-             ./scripts/config --enable CONFIG_HZ_300
-             ./scripts/config --enable CONFIG_PREEMPT
-             ./scripts/config --enable CONFIG_TCP_CONG_BBR
-             ./scripts/config --set-str CONFIG_DEFAULT_TCP_CONG "bbr"
-             ./scripts/config --enable CONFIG_IOSCHED_MAPLE
-             ./scripts/config --set-str CONFIG_DEFAULT_IOSCHED "maple"
-             ./scripts/config --enable CONFIG_DYNAMIC_FSYNC
-             ./scripts/config --enable CONFIG_ZRAM_DEF_COMP_ZSTD
-             ./scripts/config --enable CONFIG_ZSMALLOC
-          fi
-          
-          # Android 16 & KSU (Sempre Ativos)
+          # --- ANDROID 16 & KSU ---
+          ./scripts/config --enable CONFIG_ZRAM_DEF_COMP_ZSTD
+          ./scripts/config --enable CONFIG_ZSMALLOC
           ./scripts/config --enable CONFIG_PSI
           ./scripts/config --enable CONFIG_BPF_JIT
           ./scripts/config --enable CONFIG_OVERLAY_FS
           ./scripts/config --enable CONFIG_KSU
-          if [[ "${{ matrix.variant }}" != "V25_NO_WG_SUSFS" ]]; then
-             ./scripts/config --enable CONFIG_KSU_SUSFS
-             ./scripts/config --enable CONFIG_WIREGUARD
-          fi
-          ./scripts/config --enable CONFIG_KALLSYMS_ALL
+          ./scripts/config --enable CONFIG_KSU_SUSFS
           ./scripts/config --disable CONFIG_RKP_KDP
           ./scripts/config --disable CONFIG_TIMA
           ./scripts/config --disable CONFIG_SEC_RESTRICT_ROOTING
 
-          # Aceita Configs
-          make olddefconfig
+          # Aceita tudo
+          yes "" | make olddefconfig
           
-          # --- COMPILAÇÃO FINAL ---
-          
-          # Definição de Includes
+          # --- INCLUDES NA MARRA ---
           TP_PLL="-I$(pwd)/techpack/display/pll"
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
           CAM_INC="-I$TP_CAM/cam_cci -I$TP_CAM/cam_sensor_io -I$TP_CAM/cam_sensor_utils -I$(pwd)/techpack/camera/drivers/cam_req_mgr"
           
-          # Otimização (-O3 ou -O2)
-          OPT_LEVEL="-O3"
-          if [[ "${{ matrix.variant }}" == "V25_O2_SAFE" ]]; then OPT_LEVEL="-O2"; fi
+          # IGNORANCIA SUPREMA (-k e -Wno-error)
+          export KCFLAGS="-O3 -Ofast -w -Wno-error -pipe -march=armv8-a+crc+crypto -mllvm -polly -fno-builtin -fcommon $TP_PLL $CAM_INC"
+          export KCPPFLAGS="-Wno-error"
           
-          # WError (Ignorar avisos?)
-          W_FLAGS="-w"
-          if [[ "${{ matrix.variant }}" == "V25_NO_WERROR" ]]; then W_FLAGS="-w -Wno-error"; fi
-          
-          export KCFLAGS="$OPT_LEVEL -Ofast $W_FLAGS -pipe -march=armv8-a+crc+crypto -mllvm -polly -fno-builtin -fcommon $TP_PLL $CAM_INC"
-          
-          # Force Ignore?
-          MAKE_FLAGS=""
-          if [[ "${{ matrix.variant }}" == "V25_FORCE_IGNORE" ]]; then MAKE_FLAGS="-k"; fi
-
-          # COMANDO DE BUILD
-          make -j$(nproc --all) $MAKE_FLAGS \
+          make -j$(nproc --all) -k \
               CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
-              LLVM=1 LLVM_IAS=0 \
+              LLVM=1 LLVM_IAS=1 \
               DTC_FLAGS="-@" \
-              Image.gz-dtb
+              Image.gz-dtb || true
+          
+          if [ -f arch/arm64/boot/Image.gz-dtb ]; then
+              echo "✅ KERNEL COMPILADO! GLÓRIA A DEUS!"
+          else
+              echo "❌ FALHA: Arquivo não gerado."
+              exit 1
+          fi
 
-      - name: "Package ZIP"
-        if: success() || ( matrix.variant == 'V25_FORCE_IGNORE' )
+      - name: "Package ZIP (AnyKernel3)"
         run: |
           git clone https://github.com/osm0sis/AnyKernel3
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
           sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.1/by-name/boot;|block=/dev/block/by-name/boot;|g' AnyKernel3/anykernel.sh
           
-          if [ -f kernel_source/arch/arm64/boot/Image.gz-dtb ]; then
-            cp kernel_source/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
-            cd AnyKernel3 && zip -r9 ../A23-${{ matrix.variant }}.zip *
-          else
-            echo "Kernel Image not found! Build failed."
-            exit 1
-          fi
+          cp kernel_source/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
+          
+          cd AnyKernel3 && zip -r9 ../A23-V27-FINAL.zip *
 
-      - name: "Upload Artifact"
-        if: success() || ( matrix.variant == 'V25_FORCE_IGNORE' )
+      - name: "Upload Release"
         uses: actions/upload-artifact@v4
         with:
-          name: A23-${{ matrix.variant }}-PACKAGE
-          path: A23-${{ matrix.variant }}.zip
+          name: A23-V27-FINAL-PACKAGE
+          path: A23-V27-FINAL.zip
