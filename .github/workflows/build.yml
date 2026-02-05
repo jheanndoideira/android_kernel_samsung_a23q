@@ -1,4 +1,4 @@
-name: A23_V36_COLLECTOR
+name: A23_V37_SAFE_CLEAN
 on:
   workflow_dispatch:
 
@@ -54,7 +54,7 @@ jobs:
           sed -i 's/print "error, forbidden warning:", m.group(2)/print("error, forbidden warning:", m.group(2))/g' scripts/gcc-wrapper.py
           sed -i 's/print "warning, allowed warning:", m.group(2)/print("warning, allowed warning:", m.group(2))/g' scripts/gcc-wrapper.py
           
-          # Fix Audio Headers (TODOS ELES)
+          # Fix Audio Headers
           cp -r techpack/audio/asoc/codecs/tas256x/physical_layer/inc/*.h include/linux/ 2>/dev/null || true
           cp -r techpack/audio/asoc/codecs/tas256x/logical_layer/inc/*.h include/linux/ 2>/dev/null || true
 
@@ -93,7 +93,7 @@ jobs:
           
           yes "" | make O=out ARCH=arm64 olddefconfig
 
-      - name: "7. Compile EVERYTHING (Ignore Errors)"
+      - name: "7. Compile (KERNEL ONLY)"
         run: |
           TP_PLL="-I$(pwd)/techpack/display/pll"
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
@@ -101,11 +101,12 @@ jobs:
           
           export KCFLAGS="-O3 -Ofast -w -Wno-error -fno-builtin -fcommon $TP_PLL $CAM_INC"
           
-          echo "--- COMPILANDO COM FORÇA TOTAL (-k) ---"
+          echo "--- COMPILANDO APENAS KERNEL (SEM DTBO BUGADO) ---"
           
-          # Adicionado flag '-k' para ignorar erros no DTBO e continuar compilando o resto
-          # Voltamos com 'dtbs' para tentar gerar os arquivos de hardware
-          make -j$(nproc --all) -k O=out \
+          # OBJDUMP/STRIP adicionados para limpar log 0x22
+          # SEM '-k' (Segurança Total)
+          # Alvo: APENAS Image.gz-dtb
+          make -j$(nproc --all) O=out \
           ARCH=arm64 \
           CC=clang-15 \
           CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -118,7 +119,7 @@ jobs:
           HOSTCFLAGS="-w" \
           KBUILD_MODPOST_WARN=1 \
           CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
-          Image.gz-dtb dtbs || true
+          Image.gz-dtb
 
       - name: "8. Generate VBMeta"
         run: |
@@ -126,7 +127,7 @@ jobs:
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
           tar -cvf vbmeta_disabled.tar vbmeta_disabled.img
 
-      - name: "9. Package ZIP (The Collector)"
+      - name: "9. Package ZIP"
         run: |
           git clone https://github.com/osm0sis/AnyKernel3
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
@@ -138,16 +139,14 @@ jobs:
             cp out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
           fi
           
-          # [A VOLTA] Procura por QUALQUER .dtbo que tenha sido gerado e coloca no ZIP
-          echo "Coletando DTBOs sobreviventes..."
-          find out/arch/arm64/boot/dts/ -name "*.dtbo" -exec cp {} AnyKernel3/ \; || true
+          # NÃO incluímos DTBO aqui. O instalador vai manter o original seguro.
           
-          cd AnyKernel3 && zip -r9 ../A23-V36-COLLECTOR.zip *
+          cd AnyKernel3 && zip -r9 ../A23-V37-SAFE.zip *
 
       - name: "Upload Artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: A23_V36_COLLECTOR
+          name: A23_V37_SAFE
           path: |
-            A23-V36-COLLECTOR.zip
+            A23-V37-SAFE.zip
             vbmeta_disabled.tar
