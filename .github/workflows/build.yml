@@ -1,4 +1,4 @@
-name: A23_V40_FINAL_SURGERY
+name: A23_V41_REVIVAL
 on:
   workflow_dispatch:
 
@@ -45,7 +45,7 @@ jobs:
           cp -R wireguard-linux-compat/src drivers/net/wireguard
           echo "obj-y += wireguard/" >> drivers/net/Makefile
 
-      - name: "5. Apply Patches & Fixes (ALL HEADERS)"
+      - name: "5. Apply Patches & Fixes"
         run: |
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
@@ -54,7 +54,7 @@ jobs:
           sed -i 's/print "error, forbidden warning:", m.group(2)/print("error, forbidden warning:", m.group(2))/g' scripts/gcc-wrapper.py
           sed -i 's/print "warning, allowed warning:", m.group(2)/print("warning, allowed warning:", m.group(2))/g' scripts/gcc-wrapper.py
           
-          # Fix Headers (TODOS - Display e Áudio)
+          # Fix Headers (TODOS)
           cp -r techpack/audio/asoc/codecs/tas256x/physical_layer/inc/*.h include/linux/ 2>/dev/null || true
           cp -r techpack/audio/asoc/codecs/tas256x/logical_layer/inc/*.h include/linux/ 2>/dev/null || true
           cp -r techpack/display/pll/*.h include/linux/ 2>/dev/null || true
@@ -64,7 +64,7 @@ jobs:
           mkdir -p out
           make O=out ARCH=arm64 rsuntk_defconfig
 
-          # --- OTIMIZAÇÕES MÁXIMAS (Memória não é o problema) ---
+          # --- OTIMIZAÇÕES MÁXIMAS ---
           ./scripts/config --file out/.config --enable CONFIG_LTO_CLANG
           ./scripts/config --file out/.config --enable CONFIG_LTO_CLANG_FULL
           ./scripts/config --file out/.config --enable CONFIG_LLVM_POLLY
@@ -103,12 +103,9 @@ jobs:
           
           export KCFLAGS="-O3 -Ofast -w -Wno-error -fno-builtin -fcommon $TP_PLL $CAM_INC"
           
-          echo "--- COMPILANDO APENAS KERNEL (SEM O ARQUIVO PODRE) ---"
+          echo "--- COMPILANDO ---"
           
-          # AQUI ESTÁ A CORREÇÃO FINAL:
-          # Removi 'dtbs'. Só Image.gz-dtb.
-          # Mantive OBJDUMP para logs limpos.
-          
+          # Mantido igual a V40 (Que funciona)
           make -j$(nproc --all) O=out \
           ARCH=arm64 \
           CC=clang-15 \
@@ -124,9 +121,10 @@ jobs:
           CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
           Image.gz-dtb
 
-      - name: "8. Generate VBMeta"
+      - name: "8. Generate VBMeta (LINK CORRIGIDO)"
         run: |
-          curl -LO https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
+          # Usei o link da LineageOS que é garantido de funcionar
+          curl -LO https://raw.githubusercontent.com/LineageOS/android_external_avb/lineage-20.0/avbtool.py
           python3 avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta_disabled.img
           tar -cvf vbmeta_disabled.tar vbmeta_disabled.img
 
@@ -142,15 +140,12 @@ jobs:
             cp out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
           fi
           
-          # O AnyKernel3 vai usar o DTBO original do seu celular.
-          # É mais seguro e evita o erro.
-          
-          cd AnyKernel3 && zip -r9 ../A23-V40-FINAL.zip *
+          cd AnyKernel3 && zip -r9 ../A23-V41-REVIVAL.zip *
 
       - name: "Upload Artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: A23_V40_FINAL
+          name: A23_V41_REVIVAL
           path: |
-            A23-V40-FINAL.zip
+            A23-V41-REVIVAL.zip
             vbmeta_disabled.tar
