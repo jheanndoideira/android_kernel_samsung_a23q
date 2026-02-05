@@ -1,4 +1,4 @@
-name: A23_ULTIMATE_FUSION_V2
+name: A23_ULTIMATE_FUSION
 on:
   workflow_dispatch:
 
@@ -12,10 +12,10 @@ jobs:
           path: kernel_source
           fetch-depth: 1
 
-      - name: "Setup Environment (Clang 15)"
+      - name: "Setup Environment (Clang 15 - The Working One)"
         run: |
           sudo apt update
-          sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi build-essential libssl-dev bison flex device-tree-compiler python3
+          sudo apt install -y clang-15 llvm-15 lld-15 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi build-essential libssl-dev bison flex device-tree-compiler
 
       - name: "Inject KSU Next, SUSFS & WireGuard"
         run: |
@@ -32,7 +32,7 @@ jobs:
           echo "obj-y += kernelsu/" >> drivers/Makefile
           sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           
-          # Fix pgtable
+          # Fix pgtable (Nuclear)
           echo "#include <asm/pgtable.h>" > include/linux/pgtable.h
 
           # 2. SUSFS
@@ -48,17 +48,22 @@ jobs:
       - name: "Apply Critical Patches (From Working Script)"
         run: |
           cd kernel_source
+          # Esses comandos salvaram a compilação anterior, mantivemos!
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
+          
+          # Fix Audio Include (Garantia extra)
           cp -r techpack/audio/asoc/codecs/tas256x/physical_layer/inc/*.h include/linux/ 2>/dev/null || true
 
       - name: "Configure & Optimize"
         run: |
           cd kernel_source
           mkdir -p out
+          
+          # Usando o defconfig que funcionou no outro script
           make O=out rsuntk_defconfig
 
-          # --- OTIMIZAÇÕES ---
+          # --- SUA LISTA DE OTIMIZAÇÕES ---
           scripts/config --file out/.config --enable CONFIG_LTO_CLANG_FULL
           scripts/config --file out/.config --enable CONFIG_LLVM_POLLY
           scripts/config --file out/.config --enable CONFIG_HZ_300
@@ -68,7 +73,7 @@ jobs:
           scripts/config --file out/.config --enable CONFIG_IOSCHED_MAPLE
           scripts/config --file out/.config --set-str CONFIG_DEFAULT_IOSCHED "maple"
           
-          # --- FEATURES ---
+          # --- ANDROID 16 & FEATURES ---
           scripts/config --file out/.config --enable CONFIG_ZRAM_DEF_COMP_ZSTD
           scripts/config --file out/.config --enable CONFIG_ZSMALLOC
           scripts/config --file out/.config --enable CONFIG_PSI
@@ -77,7 +82,7 @@ jobs:
           scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
           scripts/config --file out/.config --enable CONFIG_WIREGUARD
 
-          # --- FIXES ---
+          # --- FIXES DE ERRO E SEGURANÇA ---
           scripts/config --file out/.config --enable SECTION_MISMATCH_WARN_ONLY
           scripts/config --file out/.config --disable REFCOUNT_FULL
           scripts/config --file out/.config --disable PANIC_ON_REFCOUNT_ERROR
@@ -87,16 +92,24 @@ jobs:
           scripts/config --file out/.config --disable CONFIG_TIMA
           scripts/config --file out/.config --disable CONFIG_SEC_RESTRICT_ROOTING
           
+          # Aceita as mudanças
           yes "" | make O=out olddefconfig
 
-      - name: "Compile (Fusion)"
+      - name: "Compile (Targets: Image.gz-dtb + DTBO)"
         run: |
           cd kernel_source
+          
+          # Definição de Includes Extras para evitar erro de 'file not found'
           TP_PLL="-I$(pwd)/techpack/display/pll"
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
           CAM_INC="-I$TP_CAM/cam_cci -I$TP_CAM/cam_sensor_io -I$TP_CAM/cam_sensor_utils -I$(pwd)/techpack/camera/drivers/cam_req_mgr"
+          
+          # Flags de Ignorância (-Wno-error) + Otimização (-O3)
           export KCFLAGS="-O3 -Ofast -w -Wno-error -fno-builtin -fcommon $TP_PLL $CAM_INC"
           
+          echo "--- INICIANDO COMPILAÇÃO FUSÃO ---"
+          
+          # DTC_FLAGS="-@" é CRÍTICO para o DTBO não crashar
           yes "" | make -j$(nproc --all) O=out \
           CC=clang-15 LD=ld.lld-15 AR=llvm-ar-15 NM=llvm-nm-15 \
           LLVM_IAS=0 \
@@ -104,18 +117,6 @@ jobs:
           KBUILD_MODPOST_WARN=1 \
           CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
           dtbo.img Image.gz-dtb
-
-      - name: "Generate VBMeta (Disabled)"
-        run: |
-          # Baixa a ferramenta oficial da Google
-          curl -LO https://raw.githubusercontent.com/external-avb/avb/master/avbtool.py
-          chmod +x avbtool.py
-          
-          # Cria um vbmeta vazio (flags 2 = disable verification)
-          ./avbtool.py make_vbmeta_image --flags 2 --padding_size 4096 --output vbmeta.img
-          
-          # Empacota em TAR para o Odin (Samsung adora .tar)
-          tar -cvf vbmeta_disabled.tar vbmeta.img
 
       - name: "Package ZIP (AnyKernel3)"
         run: |
@@ -127,21 +128,22 @@ jobs:
           if [ -f kernel_source/out/arch/arm64/boot/Image.gz-dtb ]; then
             cp kernel_source/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
           else
-             cp kernel_source/out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
+             echo "AVISO: Image.gz-dtb não gerado. Tentando Image..."
+             cp kernel_source/out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb || echo "ERRO CRÍTICO: Nenhum Kernel gerado."
           fi
           
-          # Copia DTBO
+          # Copia DTBO (Se foi gerado com sucesso)
           if [ -f kernel_source/out/arch/arm64/boot/dtbo.img ]; then
+            echo "SUCESSO: DTBO gerado!"
             cp kernel_source/out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
+          else
+            echo "AVISO: DTBO falhou ou não foi pedido. O zip vai manter o original."
           fi
           
-          cd AnyKernel3 && zip -r9 ../A23-ULTIMATE-FUSION-V2.zip *
+          cd AnyKernel3 && zip -r9 ../A23-ULTIMATE-FUSION.zip *
 
-      - name: "Upload Artifacts"
+      - name: "Upload Artifact"
         uses: actions/upload-artifact@v4
         with:
-          name: A23_ULTIMATE_FUSION_V2
-          path: |
-            A23-ULTIMATE-FUSION-V2.zip
-            vbmeta_disabled.tar
-            vbmeta.img
+          name: A23_ULTIMATE_FUSION
+          path: A23-ULTIMATE-FUSION.zip
