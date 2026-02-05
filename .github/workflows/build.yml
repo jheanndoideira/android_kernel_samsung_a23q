@@ -1,4 +1,4 @@
-name: A23_V33_1_PERFECT_STORM
+name: A23_V34_THE_SNIPER
 on:
   workflow_dispatch:
 
@@ -6,9 +6,9 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: "🔥 1. Turbo Disk Cleanup (2 min)"
+      - name: "🔥 1. Turbo Disk Cleanup"
         run: |
-          echo "Limpando lixo do GitHub Actions..."
+          echo "Limpando lixo..."
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
@@ -45,18 +45,17 @@ jobs:
           cp -R wireguard-linux-compat/src drivers/net/wireguard
           echo "obj-y += wireguard/" >> drivers/net/Makefile
 
-      - name: "5. Apply Patches & Python Fix"
+      - name: "5. Apply Patches & Fixes"
         run: |
           sed -i 's/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags)/KBUILD_CFLAGS += $(arm64_relocate_vdso_flags) -fPIC -fno-stack-protector/g' arch/arm64/kernel/vdso/Makefile
           sed -i 's/static void print_ssr_history()/static void print_ssr_history(void)/g' drivers/adsp_factory/ssc_core.c
           
-          # Fix Python 3 Print Syntax
+          # Fix Python 3
           sed -i 's/print "error, forbidden warning:", m.group(2)/print("error, forbidden warning:", m.group(2))/g' scripts/gcc-wrapper.py
           sed -i 's/print "warning, allowed warning:", m.group(2)/print("warning, allowed warning:", m.group(2))/g' scripts/gcc-wrapper.py
           
-          # Fix Audio Headers (Physical & Logical)
+          # Fix Audio Headers
           cp -r techpack/audio/asoc/codecs/tas256x/physical_layer/inc/*.h include/linux/ 2>/dev/null || true
-          # [ADICIONADO] Garante que a lógica também esteja lá
           cp -r techpack/audio/asoc/codecs/tas256x/logical_layer/inc/*.h include/linux/ 2>/dev/null || true
 
       - name: "6. Configure & Optimize"
@@ -94,7 +93,7 @@ jobs:
           
           yes "" | make O=out ARCH=arm64 olddefconfig
 
-      - name: "7. Compile (HOSTCFLAGS ADDED)"
+      - name: "7. Compile (NO DTBS = NO ERROR)"
         run: |
           TP_PLL="-I$(pwd)/techpack/display/pll"
           TP_CAM="$(pwd)/techpack/camera/drivers/cam_sensor_module"
@@ -102,9 +101,10 @@ jobs:
           
           export KCFLAGS="-O3 -Ofast -w -Wno-error -fno-builtin -fcommon $TP_PLL $CAM_INC"
           
-          echo "--- COMPILANDO ---"
+          echo "--- COMPILANDO APENAS O KERNEL (SEM DTBO BUGADO) ---"
           
-          # [FIX] Adicionei HOSTCFLAGS="-w" para o erro do OpenSSL/sign-file
+          # AQUI ESTÁ A MÁGICA: Removi 'dtbs'. 
+          # Agora ele compila só o Image.gz-dtb e não trava no erro da Samsung.
           make -j$(nproc --all) O=out \
           ARCH=arm64 \
           CC=clang-15 \
@@ -117,7 +117,7 @@ jobs:
           HOSTCFLAGS="-w" \
           KBUILD_MODPOST_WARN=1 \
           CONFIG_SECTION_MISMATCH_WARN_ONLY=y \
-          dtbs Image.gz-dtb
+          Image.gz-dtb
 
       - name: "8. Generate VBMeta"
         run: |
@@ -131,20 +131,22 @@ jobs:
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
           sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.1/by-name/boot;|block=/dev/block/by-name/boot;|g' AnyKernel3/anykernel.sh
           
+          # Copia Kernel
           if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
             cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/Image.gz-dtb
           else
             cp out/arch/arm64/boot/Image AnyKernel3/Image.gz-dtb
           fi
           
-          find out/arch/arm64/boot/dts/ -name "*.dtbo" -exec cp {} AnyKernel3/ \; || true
+          # NÃO COPIAMOS DTBO PORQUE O SOURCE ESTÁ QUEBRADO.
+          # O AnyKernel3 vai manter o original do seu celular.
           
-          cd AnyKernel3 && zip -r9 ../A23-V33-PERFECT.zip *
+          cd AnyKernel3 && zip -r9 ../A23-V34-SNIPER.zip *
 
       - name: "Upload Artifacts"
         uses: actions/upload-artifact@v4
         with:
-          name: A23_V33_PERFECT
+          name: A23_V34_SNIPER
           path: |
-            A23-V33-PERFECT.zip
+            A23-V34-SNIPER.zip
             vbmeta_disabled.tar
